@@ -134,7 +134,7 @@ data class RecordItem(val area:BodyArea,val zone:Int,val mode:EntryMode,val insu
     Card(colors=CardDefaults.cardColors(containerColor=area.color.copy(alpha=.08f))){Column(Modifier.fillMaxWidth().padding(18.dp),horizontalAlignment=Alignment.CenterHorizontally){
         Text(when(area){BodyArea.RIGHT_THIGH,BodyArea.LEFT_THIGH->"${area.label}: solo parte anteriore del quadricipite";BodyArea.RIGHT_ARM,BodyArea.LEFT_ARM->"${area.label}: dalla spalla al bicipite";else->area.label},fontWeight=FontWeight.Bold,textAlign=TextAlign.Center)
         Spacer(Modifier.height(14.dp));Column(verticalArrangement=Arrangement.spacedBy(6.dp)){repeat(rows){r->Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){repeat(cols){c->val i=r*cols+c;if(i<count){Box(Modifier.width(if(count==8)62.dp else 110.dp).height(if(count==2)110.dp else 92.dp).background(if(selected==i)area.color else area.color.copy(alpha=.65f),RoundedCornerShape(18.dp)).clickable{onSelect(i)},contentAlignment=Alignment.Center){Text("${i+1}",color=Color.White,fontSize=22.sp,fontWeight=FontWeight.Bold);if(sensor&&selected==i)Box(Modifier.align(Alignment.BottomEnd).padding(8.dp).size(26.dp).background(Color.Gray,CircleShape))}}}}}
-    }}
+    }}}
 }
 
 @Composable fun HistoryScreen(records:List<RecordItem>,onBack:()->Unit){
