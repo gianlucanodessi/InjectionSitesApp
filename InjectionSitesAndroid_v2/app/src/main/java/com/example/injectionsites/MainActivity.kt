@@ -27,6 +27,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathOperation
+import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
@@ -210,6 +211,17 @@ private fun parseDateTime(date: String, hour: String): Long? = runCatching { Sim
 }
 
 private data class ZonePath(val path: Path, val bounds: Rect, val zone: Int)
+private fun Path.contains(point: Offset): Boolean {
+    val bounds = getBounds()
+    val clip = android.graphics.Region(
+        bounds.left.toInt() - 1,
+        bounds.top.toInt() - 1,
+        bounds.right.toInt() + 1,
+        bounds.bottom.toInt() + 1
+    )
+    return android.graphics.Region().apply { setPath(asAndroidPath(), clip) }
+        .contains(point.x.toInt(), point.y.toInt())
+}
 private fun DrawScope.drawZonePath(zone: ZonePath, color: Color, sensors: List<Pair<Color, Boolean>>) {
     drawPath(zone.path,color); drawPath(zone.path,Color.White.copy(alpha=.72f),style=Stroke(1.5f))
     val center=zone.bounds.center; drawCircle(Color.White.copy(alpha=.85f),10f,center)
@@ -235,9 +247,18 @@ private fun zoomOutline(avatar: AvatarStyle,area: BodyArea): List<Offset> {
         BodyArea.LEFT_GLUTE,BodyArea.RIGHT_GLUTE -> gluteOutline(avatar,area==BodyArea.LEFT_GLUTE)
     }
 }
-private fun armOutline(a:AvatarStyle,left:Boolean):List<Offset>{fun p(vararg v:Int)=v.toList().chunked(2).map{Offset(it[0].toFloat(),it[1].toFloat())};return when(a){AvatarStyle.UOMO->if(left)p(128,38,158,38,169,70,166,122,160,183,158,238,151,252,137,246,132,190,126,125,119,72) else p(142,38,172,38,181,72,174,125,168,190,163,246,149,252,142,238,140,183,134,122,131,70);AvatarStyle.DONNA->if(left)p(130,40,158,40,166,70,163,125,160,185,157,247,145,255,135,242,132,185,127,125,122,70) else p(142,40,170,40,178,70,173,125,168,185,165,242,155,255,143,247,140,185,137,125,134,70);AvatarStyle.YETI->if(left)p(116,35,159,29,178,50,180,100,172,158,169,220,162,245,137,245,130,220,125,158,112,100,105,52) else p(141,29,184,35,195,52,188,100,175,158,170,220,163,245,138,245,131,220,128,158,120,100,122,50)}}
-private fun thighOutline(a:AvatarStyle,left:Boolean):List<Offset>{fun p(vararg v:Int)=v.toList().chunked(2).map{Offset(it[0].toFloat(),it[1].toFloat())};return when(a){AvatarStyle.UOMO->if(left)p(91,105,183,105,193,125,190,150,180,198,169,233,139,235,119,215,107,175,99,125) else p(117,105,209,105,201,125,193,175,181,215,161,235,131,233,120,198,110,150,107,125);AvatarStyle.DONNA->if(left)p(111,76,175,76,190,90,192,124,183,178,170,230,140,240,121,220,111,174,106,115) else p(125,76,189,76,194,115,189,174,179,220,160,240,130,230,117,178,108,124,110,90);AvatarStyle.YETI->if(left)p(101,34,183,34,201,74,204,128,194,180,178,224,143,230,119,216,104,174,96,116) else p(117,34,199,34,204,116,196,174,181,216,157,230,122,224,106,180,96,128,99,74)}}
-private fun gluteOutline(a:AvatarStyle,left:Boolean):List<Offset>{fun p(vararg v:Int)=v.toList().chunked(2).map{Offset(it[0].toFloat(),it[1].toFloat())};return when(a){AvatarStyle.UOMO->if(left)p(99,105,171,105,178,135,176,176,163,205,126,207,104,188,96,150) else p(129,105,201,105,204,150,196,188,174,207,137,205,124,176,122,135);AvatarStyle.DONNA->if(left)p(98,104,172,104,181,136,177,180,162,211,123,210,101,188,94,148) else p(128,104,202,104,206,148,199,188,177,210,138,211,123,180,119,136);AvatarStyle.YETI->if(left)p(105,86,175,86,181,125,178,170,164,209,128,212,107,190,98,145) else p(125,86,195,86,202,145,193,190,172,212,136,209,122,170,119,125)}}
+private fun armOutline(a:AvatarStyle,left:Boolean):List<Offset>{
+    fun p(vararg v:Int)=v.toList().chunked(2).map{Offset(it[0].toFloat(),it[1].toFloat())}
+    return when(a){AvatarStyle.UOMO->if(left)p(128,38,158,38,169,70,166,122,160,183,158,238,151,252,137,246,132,190,126,125,119,72) else p(142,38,172,38,181,72,174,125,168,190,163,246,149,252,142,238,140,183,134,122,131,70);AvatarStyle.DONNA->if(left)p(130,40,158,40,166,70,163,125,160,185,157,247,145,255,135,242,132,185,127,125,122,70) else p(142,40,170,40,178,70,173,125,168,185,165,242,155,255,143,247,140,185,137,125,134,70);AvatarStyle.YETI->if(left)p(116,35,159,29,178,50,180,100,172,158,169,220,162,245,137,245,130,220,125,158,112,100,105,52) else p(141,29,184,35,195,52,188,100,175,158,170,220,163,245,138,245,131,220,128,158,120,100,122,50)}
+}
+private fun thighOutline(a:AvatarStyle,left:Boolean):List<Offset>{
+    fun p(vararg v:Int)=v.toList().chunked(2).map{Offset(it[0].toFloat(),it[1].toFloat())}
+    return when(a){AvatarStyle.UOMO->if(left)p(91,105,183,105,193,125,190,150,180,198,169,233,139,235,119,215,107,175,99,125) else p(117,105,209,105,201,125,193,175,181,215,161,235,131,233,120,198,110,150,107,125);AvatarStyle.DONNA->if(left)p(111,76,175,76,190,90,192,124,183,178,170,230,140,240,121,220,111,174,106,115) else p(125,76,189,76,194,115,189,174,179,220,160,240,130,230,117,178,108,124,110,90);AvatarStyle.YETI->if(left)p(101,34,183,34,201,74,204,128,194,180,178,224,143,230,119,216,104,174,96,116) else p(117,34,199,34,204,116,196,174,181,216,157,230,122,224,106,180,96,128,99,74)}
+}
+private fun gluteOutline(a:AvatarStyle,left:Boolean):List<Offset>{
+    fun p(vararg v:Int)=v.toList().chunked(2).map{Offset(it[0].toFloat(),it[1].toFloat())}
+    return when(a){AvatarStyle.UOMO->if(left)p(99,105,171,105,178,135,176,176,163,205,126,207,104,188,96,150) else p(129,105,201,105,204,150,196,188,174,207,137,205,124,176,122,135);AvatarStyle.DONNA->if(left)p(98,104,172,104,181,136,177,180,162,211,123,210,101,188,94,148) else p(128,104,202,104,206,148,199,188,177,210,138,211,123,180,119,136);AvatarStyle.YETI->if(left)p(105,86,175,86,181,125,178,170,164,209,128,212,107,190,98,145) else p(125,86,195,86,202,145,193,190,172,212,136,209,122,170,119,125)}
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable private fun HistoryScreen(records: List<RecordItem>, onDelete: (RecordItem)->Unit, onBack: ()->Unit) { val formatter=remember { SimpleDateFormat("dd/MM/yyyy HH:mm",Locale.getDefault()) }; var deleting by remember { mutableStateOf<RecordItem?>(null) }; deleting?.let { record -> AlertDialog(onDismissRequest={deleting=null},title={Text("Eliminare registrazione?")},text={Text("Questa operazione non può essere annullata.")},confirmButton={TextButton(onClick={onDelete(record);deleting=null}){Text("Elimina")}},dismissButton={TextButton(onClick={deleting=null}){Text("Annulla")}}) }; Scaffold(topBar={ TopAppBar(title={Text("Storico")},navigationIcon={IconButton(onClick=onBack){Icon(Icons.Default.ArrowBack,"Indietro")}}) }) { padding -> if(records.isEmpty()) Box(Modifier.fillMaxSize().padding(padding),contentAlignment=Alignment.Center){Text("Nessuna registrazione",color=Color.Gray)} else LazyColumn(Modifier.padding(padding).padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){itemsIndexed(records){_,record->Card(Modifier.fillMaxWidth(), colors=CardDefaults.cardColors(containerColor=when { record.mode == EntryMode.SENSORE -> Color(0xFFE5E7EB); record.insulinType == InsulinType.RAPIDA -> Color(0xFFE5F5E9); else -> Color(0xFFF0E6FA) })){Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically){Column(Modifier.weight(1f)){Text(record.area.label,fontWeight=FontWeight.Bold);Text("${record.area.zones[record.zone]} · ${record.mode.label}");record.insulinType?.let{Text(it.label,color=it.color,fontWeight=FontWeight.SemiBold)};Text(formatter.format(Date(record.time)),fontSize=12.sp,color=Color.Gray)};IconButton(onClick={deleting=record}){Icon(Icons.Default.Delete,"Elimina registrazione",tint=MaterialTheme.colorScheme.error)}}}}} } }
