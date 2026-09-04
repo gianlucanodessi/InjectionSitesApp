@@ -1,6 +1,7 @@
 package com.example.injectionsites
 
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -20,13 +21,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathOperation
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -36,6 +39,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -43,6 +48,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.math.roundToInt
 
 private val Blue = Color(0xFF1557C0)
 private val Skin = Color(0xFFF1C39D)
@@ -74,31 +80,31 @@ enum class AvatarStyle(val label: String, val front: Int, val back: Int) {
     /** Dedicated anatomical artwork, when supplied, selected by avatar and side. */
     fun zoom(area: BodyArea): Int = when (this) {
         UOMO -> when (area) {
-            BodyArea.LEFT_ARM -> R.drawable.avatar_man_arm_left
-            BodyArea.RIGHT_ARM -> R.drawable.avatar_man_arm_right
+            BodyArea.LEFT_ARM -> R.drawable.avatar_man_arm_right
+            BodyArea.RIGHT_ARM -> R.drawable.avatar_man_arm_left
             BodyArea.ABDOMEN -> R.drawable.avatar_man_abdomen
-            BodyArea.LEFT_THIGH -> R.drawable.avatar_man_thigh_left
-            BodyArea.RIGHT_THIGH -> R.drawable.avatar_man_thigh_right
-            BodyArea.LEFT_GLUTE -> R.drawable.avatar_man_glute_left
-            BodyArea.RIGHT_GLUTE -> R.drawable.avatar_man_glute_right
+            BodyArea.LEFT_THIGH -> R.drawable.avatar_man_thigh_right
+            BodyArea.RIGHT_THIGH -> R.drawable.avatar_man_thigh_left
+            BodyArea.LEFT_GLUTE -> R.drawable.avatar_man_glute_right
+            BodyArea.RIGHT_GLUTE -> R.drawable.avatar_man_glute_left
         }
         DONNA -> when (area) {
-            BodyArea.LEFT_ARM -> R.drawable.avatar_woman_arm_left
-            BodyArea.RIGHT_ARM -> R.drawable.avatar_woman_arm_right
+            BodyArea.LEFT_ARM -> R.drawable.avatar_woman_arm_right
+            BodyArea.RIGHT_ARM -> R.drawable.avatar_woman_arm_left
             BodyArea.ABDOMEN -> R.drawable.avatar_woman_abdomen
-            BodyArea.LEFT_THIGH -> R.drawable.avatar_woman_thigh_left
-            BodyArea.RIGHT_THIGH -> R.drawable.avatar_woman_thigh_right
-            BodyArea.LEFT_GLUTE -> R.drawable.avatar_woman_glute_left
-            BodyArea.RIGHT_GLUTE -> R.drawable.avatar_woman_glute_right
+            BodyArea.LEFT_THIGH -> R.drawable.avatar_woman_thigh_right
+            BodyArea.RIGHT_THIGH -> R.drawable.avatar_woman_thigh_left
+            BodyArea.LEFT_GLUTE -> R.drawable.avatar_woman_glute_right
+            BodyArea.RIGHT_GLUTE -> R.drawable.avatar_woman_glute_left
         }
         YETI -> when (area) {
-            BodyArea.LEFT_ARM -> R.drawable.avatar_yeti_arm_left
-            BodyArea.RIGHT_ARM -> R.drawable.avatar_yeti_arm_right
+            BodyArea.LEFT_ARM -> R.drawable.avatar_yeti_arm_right
+            BodyArea.RIGHT_ARM -> R.drawable.avatar_yeti_arm_left
             BodyArea.ABDOMEN -> R.drawable.avatar_yeti_abdomen
-            BodyArea.LEFT_THIGH -> R.drawable.avatar_yeti_thigh_left
-            BodyArea.RIGHT_THIGH -> R.drawable.avatar_yeti_thigh_right
-            BodyArea.LEFT_GLUTE -> R.drawable.avatar_yeti_glute_left
-            BodyArea.RIGHT_GLUTE -> R.drawable.avatar_yeti_glute_right
+            BodyArea.LEFT_THIGH -> R.drawable.avatar_yeti_thigh_right
+            BodyArea.RIGHT_THIGH -> R.drawable.avatar_yeti_thigh_left
+            BodyArea.LEFT_GLUTE -> R.drawable.avatar_yeti_glute_right
+            BodyArea.RIGHT_GLUTE -> R.drawable.avatar_yeti_glute_left
         }
     }
 }
@@ -148,48 +154,97 @@ private fun activeSensor(records: List<RecordItem>): RecordItem? = records.filte
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable private fun HomeScreen(records: List<RecordItem>, sensor: RecordItem?, avatar: AvatarStyle, onArea: (BodyArea) -> Unit, onHistory: () -> Unit, onSettings: () -> Unit) = Scaffold(topBar = { TopAppBar(title = { Column { Text("Nuova iniezione", fontWeight = FontWeight.Bold); Text("Seleziona una zona sulla sagoma", fontSize = 12.sp, color = Color.Gray) } }, actions = { IconButton(onClick = onHistory) { Icon(Icons.Default.History, "Storico") }; IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, "Impostazioni") } }) }) { padding -> LazyColumn(Modifier.padding(padding).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) { item { BodyMap(records, sensor, avatar, onArea) }; item { AvailabilityLegend() }; item { Text("Tutte le aree", fontWeight = FontWeight.Bold, fontSize = 18.sp) }; itemsIndexed(BodyArea.entries) { _, bodyArea -> AreaCard(bodyArea) { onArea(bodyArea) } }; item { Spacer(Modifier.height(20.dp)) } } }
-@Composable private fun AvailabilityLegend() = Card(colors = CardDefaults.cardColors(containerColor = SurfaceTint)) { Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceEvenly) { Text("Disponibilità:", fontWeight = FontWeight.Bold, fontSize = 13.sp); LegendDot(RED, "< ${currentSettings.redHours} h"); LegendDot(ORANGE, "${currentSettings.redHours}–${currentSettings.orangeHours} h"); LegendDot(YELLOW, "${currentSettings.orangeHours}–${currentSettings.yellowHours} h"); LegendDot(GREEN, "> ${currentSettings.yellowHours} h") } }
-@Composable private fun LegendDot(color: Color, text: String) = Row(verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(9.dp).background(color, CircleShape)); Spacer(Modifier.width(3.dp)); Text(text, fontSize = 11.sp) }
+@Composable private fun AvailabilityLegend() = Card(colors = CardDefaults.cardColors(containerColor = SurfaceTint)) { Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Disponibilità:", fontWeight = FontWeight.Bold, fontSize = 13.sp); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) { LegendDot(RED, "< ${currentSettings.redHours} h", Modifier.weight(1f)); LegendDot(ORANGE, "${currentSettings.redHours}–${currentSettings.orangeHours} h", Modifier.weight(1f)) }; Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) { LegendDot(YELLOW, "${currentSettings.orangeHours}–${currentSettings.yellowHours} h", Modifier.weight(1f)); LegendDot(GREEN, "> ${currentSettings.yellowHours} h", Modifier.weight(1f)) } } }
+@Composable private fun LegendDot(color: Color, text: String, modifier: Modifier = Modifier) = Row(modifier, verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(9.dp).background(color, CircleShape)); Spacer(Modifier.width(4.dp)); Text(text, fontSize = 11.sp, maxLines = 1) }
 private fun zoneColor(area: BodyArea, index: Int, records: List<RecordItem>): Color { val last = records.filter { it.mode == EntryMode.INSULINA && it.area == area && it.zone == index }.maxByOrNull { it.time } ?: return GREEN; val hours = (System.currentTimeMillis() - last.time).coerceAtLeast(0) / 3_600_000f; return when { hours < currentSettings.redHours -> RED; hours < currentSettings.orangeHours -> ORANGE; hours < currentSettings.yellowHours -> YELLOW; else -> GREEN } }
 @Composable private fun AreaCard(area: BodyArea, onClick: () -> Unit) = Card(Modifier.fillMaxWidth().clickable(onClick = onClick), colors = CardDefaults.cardColors(containerColor = area.color.copy(alpha = .08f))) { Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(14.dp).background(area.color, CircleShape)); Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(area.label, fontWeight = FontWeight.Bold); Text("${area.zones.size} zone selezionabili", fontSize = 12.sp, color = Color.Gray) }; Icon(Icons.Default.ChevronRight, null, tint = Blue) } }
 @Composable private fun BodyMap(records: List<RecordItem>, sensor: RecordItem?, avatar: AvatarStyle, onArea: (BodyArea) -> Unit) = Card(colors = CardDefaults.cardColors(containerColor = SurfaceTint)) { Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) { Text("Vista a specchio", fontWeight = FontWeight.Bold, fontSize = 18.sp); Text("Tocca un gruppo di zone per ingrandirlo", fontSize = 12.sp, color = Color.Gray); FrontBodyCanvas(records, sensor, avatar, onArea); HorizontalDivider(Modifier.padding(vertical = 4.dp)); Text("Vista posteriore · glutei", fontWeight = FontWeight.SemiBold, fontSize = 13.sp); GluteCanvas(records, sensor, avatar, onArea) } }
 
 private data class Hit(val rect: Rect, val area: BodyArea, val zone: Int)
-private fun DrawScope.zoneBox(rect: Rect, color: Color, number: Int, sensors: List<Pair<Color, Boolean>>) { drawRoundRect(color, rect.topLeft, rect.size, CornerRadius(9f, 9f)); drawRoundRect(Color.White.copy(alpha = .72f), rect.topLeft, rect.size, CornerRadius(9f, 9f), Stroke(1.5f)); drawCircle(Color.White.copy(alpha = .85f), 10f, rect.center); drawContext.canvas.nativeCanvas.drawText("${number + 1}", rect.center.x - 3.5f, rect.center.y + 4f, android.graphics.Paint().apply { this.color = android.graphics.Color.DKGRAY; textSize = 11f; isFakeBoldText = true }); sensors.forEachIndexed { index, (sensorColor, active) -> val center=Offset(rect.center.x + index.coerceAtMost(2) * 9f - 9f, rect.center.y); drawCircle(Color.White.copy(alpha=if(active) .95f else .55f),if(active) 15f else 11f,center); drawCircle(sensorColor.copy(alpha=if(active) 1f else .38f),if(active) 12f else 8f,center); if(active) drawCircle(Color.White.copy(alpha=.45f),4f,Offset(center.x-3f,center.y-3f)) } }
 private fun sensorMarkers(records: List<RecordItem>, active: RecordItem?, hit: Hit): List<Pair<Color, Boolean>> = records.asSequence().filter { it.mode == EntryMode.SENSORE && it.area == hit.area && it.zone == hit.zone }.sortedByDescending { it.createdAt }.mapNotNull { record -> SensorLifecycle.colorAt(record.time)?.let { color -> color to (record === active || record == active) } }.take(3).toList()
-@Composable private fun FrontBodyCanvas(records: List<RecordItem>, sensor: RecordItem?, avatar: AvatarStyle, onArea: (BodyArea) -> Unit) = Box(Modifier.fillMaxWidth().height(500.dp)) {
-    Image(painterResource(avatar.front), null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
-    Canvas(Modifier.fillMaxSize().pointerInput(avatar) { detectTapGestures { point -> frontHits(size.width / 300f).firstOrNull { it.rect.contains(point) }?.let { onArea(it.area) } } }) { val scale = size.width / 300f; frontHits(scale).forEach { zoneBox(it.rect, zoneColor(it.area, it.zone, records).copy(alpha=.72f), it.zone, sensorMarkers(records,sensor,it)) } }
+private data class ImagePlacement(val left: Int, val top: Int, val width: Int, val height: Int) {
+    fun point(normalized: Offset) = Offset(left + normalized.x * width, top + normalized.y * height)
 }
-private fun frontHits(s: Float): List<Hit> {
-    fun rect(left: Float, top: Float, right: Float, bottom: Float) = Rect(left * s, top * s, right * s, bottom * s)
-    val result = mutableListOf<Hit>()
-    fun add(area: BodyArea, x: Float, y: Float, width: Float, height: Float, columns: Int, rows: Int) {
-        repeat(rows) { row ->
-            repeat(columns) { column ->
-                result += Hit(rect(x + column * width / columns, y + row * height / rows, x + (column + 1) * width / columns, y + (row + 1) * height / rows), area, row * columns + column)
-            }
+private data class DashboardZone(val path: Path, val bounds: Rect, val area: BodyArea, val zone: Int)
+private fun fitImage(imageWidth: Int, imageHeight: Int, canvas: Size): ImagePlacement {
+    val scale = minOf(canvas.width / imageWidth, canvas.height / imageHeight)
+    val width = (imageWidth * scale).roundToInt(); val height = (imageHeight * scale).roundToInt()
+    return ImagePlacement(((canvas.width - width) / 2f).roundToInt(), ((canvas.height - height) / 2f).roundToInt(), width, height)
+}
+private fun anatomicalPath(placement: ImagePlacement, points: List<Offset>) = Path().apply {
+    placement.point(points.first()).let { moveTo(it.x, it.y) }
+    points.drop(1).forEach { placement.point(it).let { point -> lineTo(point.x, point.y) } }
+    close()
+}
+private fun splitDashboardPath(outline: Path, area: BodyArea, columns: Int, rows: Int, reverseColumns: Boolean = false): List<DashboardZone> {
+    val bounds = outline.getBounds()
+    return List(columns * rows) { cell ->
+        val row = cell / columns; val column = cell % columns
+        val clip = Path().apply { addRect(Rect(bounds.left + bounds.width * column / columns, bounds.top + bounds.height * row / rows, bounds.left + bounds.width * (column + 1) / columns, bounds.top + bounds.height * (row + 1) / rows)) }
+        val path = Path.combine(PathOperation.Intersect, outline, clip)
+        val zone = row * columns + if (reverseColumns) columns - 1 - column else column
+        DashboardZone(path, path.getBounds(), area, zone)
+    }
+}
+private fun mirrored(points: List<Offset>) = points.map { Offset(1f - it.x, it.y) }
+private fun frontOutline(avatar: AvatarStyle, area: BodyArea): List<Offset> {
+    val left = when (area) {
+        BodyArea.LEFT_ARM -> when (avatar) {
+            AvatarStyle.UOMO -> listOf(Offset(.245f,.26f),Offset(.315f,.235f),Offset(.35f,.285f),Offset(.34f,.35f),Offset(.315f,.41f),Offset(.275f,.43f),Offset(.24f,.39f),Offset(.225f,.32f))
+            AvatarStyle.DONNA -> listOf(Offset(.345f,.27f),Offset(.39f,.29f),Offset(.405f,.35f),Offset(.395f,.42f),Offset(.37f,.46f),Offset(.335f,.44f),Offset(.32f,.37f))
+            AvatarStyle.YETI -> listOf(Offset(.25f,.395f),Offset(.325f,.41f),Offset(.345f,.48f),Offset(.325f,.56f),Offset(.285f,.63f),Offset(.235f,.605f),Offset(.205f,.52f),Offset(.215f,.445f))
         }
+        BodyArea.ABDOMEN -> return when (avatar) {
+            AvatarStyle.UOMO -> listOf(Offset(.35f,.34f),Offset(.65f,.34f),Offset(.665f,.405f),Offset(.64f,.455f),Offset(.58f,.475f),Offset(.42f,.475f),Offset(.36f,.455f),Offset(.335f,.405f))
+            AvatarStyle.DONNA -> listOf(Offset(.405f,.395f),Offset(.595f,.395f),Offset(.615f,.445f),Offset(.585f,.49f),Offset(.415f,.49f),Offset(.385f,.445f))
+            AvatarStyle.YETI -> listOf(Offset(.35f,.44f),Offset(.65f,.44f),Offset(.69f,.51f),Offset(.675f,.61f),Offset(.625f,.675f),Offset(.375f,.675f),Offset(.325f,.61f),Offset(.31f,.51f))
+        }
+        BodyArea.LEFT_THIGH -> when (avatar) {
+            AvatarStyle.UOMO -> listOf(Offset(.305f,.59f),Offset(.49f,.60f),Offset(.475f,.67f),Offset(.445f,.72f),Offset(.34f,.715f),Offset(.3f,.665f))
+            AvatarStyle.DONNA -> listOf(Offset(.36f,.535f),Offset(.49f,.565f),Offset(.48f,.65f),Offset(.45f,.70f),Offset(.38f,.685f),Offset(.345f,.59f))
+            AvatarStyle.YETI -> listOf(Offset(.33f,.70f),Offset(.49f,.715f),Offset(.48f,.82f),Offset(.44f,.87f),Offset(.335f,.855f),Offset(.305f,.76f))
+        }
+        else -> return mirrored(frontOutline(avatar, when (area) { BodyArea.RIGHT_ARM -> BodyArea.LEFT_ARM; BodyArea.RIGHT_THIGH -> BodyArea.LEFT_THIGH; else -> area }))
     }
-    // On the mirrored front view, the left arm's inner column is the one nearest the torso.
-    repeat(2) { row ->
-        result += Hit(rect(62f, 90f + row * 65f, 77f, 155f + row * 65f), BodyArea.LEFT_ARM, row * 2)
-        result += Hit(rect(47f, 90f + row * 65f, 62f, 155f + row * 65f), BodyArea.LEFT_ARM, row * 2 + 1)
+    return left
+}
+private fun backOutline(avatar: AvatarStyle, area: BodyArea): List<Offset> {
+    val left = when (avatar) {
+        AvatarStyle.UOMO -> listOf(Offset(.34f,.505f),Offset(.49f,.505f),Offset(.49f,.62f),Offset(.445f,.64f),Offset(.355f,.625f),Offset(.315f,.57f))
+        AvatarStyle.DONNA -> listOf(Offset(.365f,.505f),Offset(.49f,.515f),Offset(.49f,.59f),Offset(.45f,.615f),Offset(.375f,.60f),Offset(.345f,.55f))
+        AvatarStyle.YETI -> listOf(Offset(.335f,.59f),Offset(.49f,.58f),Offset(.49f,.71f),Offset(.44f,.74f),Offset(.34f,.715f),Offset(.30f,.65f))
     }
-    add(BodyArea.RIGHT_ARM, 223f, 90f, 30f, 130f, 2, 2)
-    add(BodyArea.ABDOMEN, 103f, 132f, 94f, 96f, 4, 2); add(BodyArea.LEFT_THIGH, 111f, 244f, 34f, 135f, 2, 2); add(BodyArea.RIGHT_THIGH, 155f, 244f, 34f, 135f, 2, 2)
-    return result
+    return if (area == BodyArea.LEFT_GLUTE) left else mirrored(left)
 }
-@Composable private fun GluteCanvas(records: List<RecordItem>, sensor: RecordItem?, avatar: AvatarStyle, onArea: (BodyArea) -> Unit) = Box(Modifier.fillMaxWidth().height(300.dp)) {
-    Image(painterResource(avatar.back), null, Modifier.fillMaxSize(), contentScale=ContentScale.FillBounds)
-    Canvas(Modifier.fillMaxSize().pointerInput(avatar) { detectTapGestures { point -> gluteHits(size.width/300f).firstOrNull { it.rect.contains(point) }?.let { onArea(it.area) } } }) { val s=size.width/300f; gluteHits(s).forEach { zoneBox(it.rect,zoneColor(it.area,it.zone,records).copy(alpha=.72f),it.zone,sensorMarkers(records,sensor,it)) } }
+private fun frontZones(avatar: AvatarStyle, placement: ImagePlacement): List<DashboardZone> = buildList {
+    addAll(splitDashboardPath(anatomicalPath(placement, frontOutline(avatar, BodyArea.LEFT_ARM)), BodyArea.LEFT_ARM, 2, 2, reverseColumns = true))
+    addAll(splitDashboardPath(anatomicalPath(placement, frontOutline(avatar, BodyArea.RIGHT_ARM)), BodyArea.RIGHT_ARM, 2, 2))
+    addAll(splitDashboardPath(anatomicalPath(placement, frontOutline(avatar, BodyArea.ABDOMEN)), BodyArea.ABDOMEN, 4, 2))
+    addAll(splitDashboardPath(anatomicalPath(placement, frontOutline(avatar, BodyArea.LEFT_THIGH)), BodyArea.LEFT_THIGH, 2, 2))
+    addAll(splitDashboardPath(anatomicalPath(placement, frontOutline(avatar, BodyArea.RIGHT_THIGH)), BodyArea.RIGHT_THIGH, 2, 2))
 }
-private fun gluteHits(s: Float): List<Hit> {
-    fun rect(left: Float, top: Float, right: Float, bottom: Float) = Rect(left * s, top * s, right * s, bottom * s)
-    return listOf(
-        Hit(rect(91f, 18f, 148f, 60f), BodyArea.LEFT_GLUTE, 0), Hit(rect(152f, 18f, 209f, 60f), BodyArea.RIGHT_GLUTE, 0),
-        Hit(rect(91f, 60f, 148f, 102f), BodyArea.LEFT_GLUTE, 1), Hit(rect(152f, 60f, 209f, 102f), BodyArea.RIGHT_GLUTE, 1)
-    )
+private fun gluteZones(avatar: AvatarStyle, placement: ImagePlacement): List<DashboardZone> = buildList {
+    addAll(splitDashboardPath(anatomicalPath(placement, backOutline(avatar, BodyArea.LEFT_GLUTE)), BodyArea.LEFT_GLUTE, 1, 2))
+    addAll(splitDashboardPath(anatomicalPath(placement, backOutline(avatar, BodyArea.RIGHT_GLUTE)), BodyArea.RIGHT_GLUTE, 1, 2))
+}
+private fun DrawScope.drawDashboardZone(zone: DashboardZone, records: List<RecordItem>, sensor: RecordItem?) {
+    drawZonePath(ZonePath(zone.path, zone.bounds, zone.zone), zoneColor(zone.area, zone.zone, records).copy(alpha=.72f), sensorMarkers(records, sensor, Hit(zone.bounds, zone.area, zone.zone)))
+}
+@Composable private fun rawImageBitmap(resource: Int): ImageBitmap {
+    val resources = LocalContext.current.resources
+    return remember(resources, resource) { BitmapFactory.decodeResource(resources, resource, BitmapFactory.Options().apply { inScaled = false }).asImageBitmap() }
+}
+@Composable private fun FrontBodyCanvas(records: List<RecordItem>, sensor: RecordItem?, avatar: AvatarStyle, onArea: (BodyArea) -> Unit) {
+    val bitmap = rawImageBitmap(avatar.front)
+    Canvas(Modifier.fillMaxWidth().aspectRatio(bitmap.width.toFloat() / bitmap.height).pointerInput(avatar, bitmap.width, bitmap.height) { detectTapGestures { point -> val placement=fitImage(bitmap.width,bitmap.height,Size(size.width.toFloat(),size.height.toFloat()));frontZones(avatar,placement).firstOrNull { it.path.contains(point) }?.let { onArea(it.area) } } }) {
+        val placement=fitImage(bitmap.width,bitmap.height,size);drawImage(bitmap,dstOffset=IntOffset(placement.left,placement.top),dstSize=IntSize(placement.width,placement.height),filterQuality=FilterQuality.High);frontZones(avatar,placement).forEach { drawDashboardZone(it,records,sensor) }
+    }
+}
+@Composable private fun GluteCanvas(records: List<RecordItem>, sensor: RecordItem?, avatar: AvatarStyle, onArea: (BodyArea) -> Unit) {
+    val bitmap = rawImageBitmap(avatar.back)
+    Canvas(Modifier.fillMaxWidth().aspectRatio(bitmap.width.toFloat() / bitmap.height).pointerInput(avatar, bitmap.width, bitmap.height) { detectTapGestures { point -> val placement=fitImage(bitmap.width,bitmap.height,Size(size.width.toFloat(),size.height.toFloat()));gluteZones(avatar,placement).firstOrNull { it.path.contains(point) }?.let { onArea(it.area) } } }) {
+        val placement=fitImage(bitmap.width,bitmap.height,size);drawImage(bitmap,dstOffset=IntOffset(placement.left,placement.top),dstSize=IntSize(placement.width,placement.height),filterQuality=FilterQuality.High);gluteZones(avatar,placement).forEach { drawDashboardZone(it,records,sensor) }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
