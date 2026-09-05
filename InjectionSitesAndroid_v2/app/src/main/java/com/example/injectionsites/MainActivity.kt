@@ -1,10 +1,14 @@
 package com.example.injectionsites
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -39,11 +43,15 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -55,14 +63,14 @@ private val Skin = Color(0xFFF1C39D)
 private val SurfaceTint = Color(0xFFF6F8FC)
 
 /** Persisted, centralised timing settings. Injection and sensor cycles stay independent. */
-private data class TimingSettings(val redHours: Float = 12f, val orangeHours: Float = 24f, val yellowHours: Float = 36f, val sensorStageDays: Long = 10, val sensorHiddenDays: Long = 40) {
+internal data class TimingSettings(val redHours: Float = 12f, val orangeHours: Float = 24f, val yellowHours: Float = 36f, val sensorStageDays: Long = 10, val sensorHiddenDays: Long = 40) {
     fun valid() = redHours > 0 && redHours < orangeHours && orangeHours < yellowHours && sensorStageDays > 0 && sensorStageDays * 3 < sensorHiddenDays
 }
-private val DefaultSettings = TimingSettings()
+internal val DefaultSettings = TimingSettings()
 private var currentSettings = DefaultSettings
-private const val SETTINGS_KEY = "timing_settings"; private const val AVATAR_KEY = "avatar_style"
-private fun loadSettings(context: Context) = context.getSharedPreferences(STORAGE, Context.MODE_PRIVATE).let { p -> TimingSettings(p.getFloat("red",12f),p.getFloat("orange",24f),p.getFloat("yellow",36f),p.getLong("sensorStage",10),p.getLong("sensorHidden",40)).takeIf { it.valid() } ?: DefaultSettings }
-private fun saveSettings(context: Context, value: TimingSettings) { context.getSharedPreferences(STORAGE, Context.MODE_PRIVATE).edit().putFloat("red",value.redHours).putFloat("orange",value.orangeHours).putFloat("yellow",value.yellowHours).putLong("sensorStage",value.sensorStageDays).putLong("sensorHidden",value.sensorHiddenDays).apply() }
+private const val SETTINGS_KEY = "timing_settings"; internal const val AVATAR_KEY = "avatar_style"
+internal fun loadSettings(context: Context) = context.getSharedPreferences(STORAGE, Context.MODE_PRIVATE).let { p -> TimingSettings(p.getFloat("red",12f),p.getFloat("orange",24f),p.getFloat("yellow",36f),p.getLong("sensorStage",10),p.getLong("sensorHidden",40)).takeIf { it.valid() } ?: DefaultSettings }
+private fun saveSettings(context: Context, value: TimingSettings): Boolean = context.getSharedPreferences(STORAGE, Context.MODE_PRIVATE).edit().putFloat("red",value.redHours).putFloat("orange",value.orangeHours).putFloat("yellow",value.yellowHours).putLong("sensorStage",value.sensorStageDays).putLong("sensorHidden",value.sensorHiddenDays).commit()
 private val RED = Color(0xFFDC2626); private val ORANGE = Color(0xFFF97316); private val YELLOW = Color(0xFFEAB308); private val GREEN = Color(0xFF16A34A)
 private object SensorLifecycle {
     val DARK = Color(0xFF475569); val MEDIUM = Color(0xFF7C8796); val LIGHT = Color(0xFFB8C0CB); val FADED = Color(0xFFDEE3EA)
@@ -122,13 +130,18 @@ data class RecordItem(
     /** Time of the event selected by the user. */
     val time: Long = System.currentTimeMillis(),
     /** Keeps the most recently entered sensor active even when it is backdated. */
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val id: String = UUID.randomUUID().toString()
 )
 
-private const val STORAGE = "injection_sites"; private const val HISTORY_KEY = "injection_history"; private const val LEGACY_SENSOR_KEY = "sensor_position"
-private fun RecordItem.toJson() = JSONObject().apply { put("area", area.name); put("zone", zone); put("mode", mode.name); put("insulinType", insulinType?.name); put("time", time); put("createdAt", createdAt) }
-private fun recordFromJson(json: JSONObject): RecordItem? = runCatching { val time = json.getLong("time"); RecordItem(BodyArea.valueOf(json.getString("area")), json.getInt("zone"), EntryMode.valueOf(json.getString("mode")), json.optString("insulinType").takeIf { it.isNotBlank() && it != "null" }?.let(InsulinType::valueOf), time, json.optLong("createdAt", time)) }.getOrNull()
-private fun loadRecords(context: Context): List<RecordItem> = runCatching {
+internal const val STORAGE = "injection_sites"; internal const val HISTORY_KEY = "injection_history"; internal const val LEGACY_SENSOR_KEY = "sensor_position"
+internal fun RecordItem.toJson() = JSONObject().apply { put("id",id);put("area", area.name); put("zone", zone); put("mode", mode.name); put("insulinType", insulinType?.name); put("time", time); put("createdAt", createdAt) }
+internal fun recordFromJson(json: JSONObject): RecordItem? = runCatching {
+    val time=json.getLong("time");val area=BodyArea.valueOf(json.getString("area"));val zone=json.getInt("zone");val mode=EntryMode.valueOf(json.getString("mode"));val insulin=json.optString("insulinType").takeIf { it.isNotBlank()&&it!="null" }?.let(InsulinType::valueOf);val createdAt=json.optLong("createdAt",time)
+    val id=json.optString("id").takeIf { it.isNotBlank() } ?: UUID.nameUUIDFromBytes("${area.name}|$zone|${mode.name}|${insulin?.name}|$time|$createdAt".toByteArray()).toString()
+    RecordItem(area,zone,mode,insulin,time,createdAt,id)
+}.getOrNull()
+internal fun loadRecords(context: Context): List<RecordItem> = runCatching {
     val preferences = context.getSharedPreferences(STORAGE, Context.MODE_PRIVATE)
     val records = JSONArray(preferences.getString(HISTORY_KEY, "[]")).let { data -> (0 until data.length()).mapNotNull { recordFromJson(data.getJSONObject(it)) } }.toMutableList()
     preferences.getString(LEGACY_SENSOR_KEY, null)?.let { raw -> recordFromJson(JSONObject(raw))?.takeIf { legacy -> records.none { it.mode == EntryMode.SENSORE && it.time == legacy.time } }?.let(records::add) }
@@ -147,7 +160,7 @@ private fun activeSensor(records: List<RecordItem>): RecordItem? = records.filte
     when (screen) {
         "home" -> key(refreshTick, avatar, settings) { HomeScreen(records, activeSensor(records), avatar, { area = it; screen = "area" }, { screen = "history" }, { screen = "settings" }) }
         "area" -> area?.let { selected -> AreaScreen(selected, records, activeSensor(records), avatar, { record -> records.add(0, record); persist() }) { screen = "home" } }
-        "settings" -> SettingsScreen(avatar, settings, { avatar = it; context.getSharedPreferences(STORAGE, Context.MODE_PRIVATE).edit().putString(AVATAR_KEY, it.name).apply() }, { settings = it; saveSettings(context,it) }) { screen = "home" }
+        "settings" -> SettingsScreen(avatar, settings, { avatar = it; context.getSharedPreferences(STORAGE, Context.MODE_PRIVATE).edit().putString(AVATAR_KEY, it.name).apply() }, { candidate -> saveSettings(context,candidate).also { saved -> if(saved) settings=candidate } }, { AppBackupState(records.toList(),settings,avatar) }, { imported -> records.clear();records.addAll(imported.records);settings=imported.settings;avatar=imported.avatar }) { screen = "home" }
         else -> HistoryScreen(records, { record -> records.remove(record); persist() }) { screen = "home" }
     }
 }
@@ -319,20 +332,84 @@ private fun gluteOutline(a:AvatarStyle,left:Boolean):List<Offset>{
 @Composable private fun HistoryScreen(records: List<RecordItem>, onDelete: (RecordItem)->Unit, onBack: ()->Unit) { val formatter=remember { SimpleDateFormat("dd/MM/yyyy HH:mm",Locale.getDefault()) }; var deleting by remember { mutableStateOf<RecordItem?>(null) }; deleting?.let { record -> AlertDialog(onDismissRequest={deleting=null},title={Text("Eliminare registrazione?")},text={Text("Questa operazione non può essere annullata.")},confirmButton={TextButton(onClick={onDelete(record);deleting=null}){Text("Elimina")}},dismissButton={TextButton(onClick={deleting=null}){Text("Annulla")}}) }; Scaffold(topBar={ TopAppBar(title={Text("Storico")},navigationIcon={IconButton(onClick=onBack){Icon(Icons.Default.ArrowBack,"Indietro")}}) }) { padding -> if(records.isEmpty()) Box(Modifier.fillMaxSize().padding(padding),contentAlignment=Alignment.Center){Text("Nessuna registrazione",color=Color.Gray)} else LazyColumn(Modifier.padding(padding).padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){itemsIndexed(records){_,record->Card(Modifier.fillMaxWidth(), colors=CardDefaults.cardColors(containerColor=when { record.mode == EntryMode.SENSORE -> Color(0xFFE5E7EB); record.insulinType == InsulinType.RAPIDA -> Color(0xFFE5F5E9); else -> Color(0xFFF0E6FA) })){Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically){Column(Modifier.weight(1f)){Text(record.area.label,fontWeight=FontWeight.Bold);Text("${record.area.zones[record.zone]} · ${record.mode.label}");record.insulinType?.let{Text(it.label,color=it.color,fontWeight=FontWeight.SemiBold)};Text(formatter.format(Date(record.time)),fontSize=12.sp,color=Color.Gray)};IconButton(onClick={deleting=record}){Icon(Icons.Default.Delete,"Elimina registrazione",tint=MaterialTheme.colorScheme.error)}}}}} } }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable private fun SettingsScreen(avatar: AvatarStyle, settings: TimingSettings, onAvatar: (AvatarStyle)->Unit, onSettings: (TimingSettings)->Unit, onBack: () -> Unit) {
-    var red by remember(settings) { mutableStateOf(settings.redHours.toString()) }; var orange by remember(settings) { mutableStateOf(settings.orangeHours.toString()) }; var yellow by remember(settings) { mutableStateOf(settings.yellowHours.toString()) }
-    var stage by remember(settings) { mutableStateOf(settings.sensorStageDays.toString()) }; var hidden by remember(settings) { mutableStateOf(settings.sensorHiddenDays.toString()) }; var error by remember { mutableStateOf<String?>(null) }
-    fun save() { val candidate=TimingSettings(red.toFloatOrNull() ?: -1f,orange.toFloatOrNull() ?: -1f,yellow.toFloatOrNull() ?: -1f,stage.toLongOrNull() ?: -1,hidden.toLongOrNull() ?: -1); if(candidate.valid()) { onSettings(candidate); error=null } else error="Le soglie devono essere crescenti; il sensore deve avere tre stadi prima della scomparsa." }
-    Scaffold(topBar={ TopAppBar(title={Text("Impostazioni")},navigationIcon={IconButton(onClick=onBack){Icon(Icons.Default.ArrowBack,"Indietro")}}) }, bottomBar={ Surface(shadowElevation=8.dp) { Button(onClick=::save,Modifier.fillMaxWidth().padding(16.dp)){Text("Salva impostazioni")} } }) { padding -> LazyColumn(Modifier.padding(padding).padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+@Composable private fun SettingsScreen(avatar: AvatarStyle, settings: TimingSettings, onAvatar: (AvatarStyle)->Unit, onSettings: (TimingSettings)->Boolean, backupState: ()->AppBackupState, onImported: (AppBackupState)->Unit, onBack: () -> Unit) {
+    val context=LocalContext.current;val scope=rememberCoroutineScope()
+    var red by remember { mutableStateOf(settings.redHours.toString()) }; var orange by remember { mutableStateOf(settings.orangeHours.toString()) }; var yellow by remember { mutableStateOf(settings.yellowHours.toString()) }
+    var stage by remember { mutableStateOf(settings.sensorStageDays.toString()) }; var hidden by remember { mutableStateOf(settings.sensorHiddenDays.toString()) }; var error by remember { mutableStateOf<String?>(null) }
+    var saving by remember { mutableStateOf(false) };var saved by remember { mutableStateOf(false) }
+    LaunchedEffect(saved){if(saved){delay(2_500);saved=false}}
+    fun save(){
+        val candidate=TimingSettings(red.toFloatOrNull() ?: -1f,orange.toFloatOrNull() ?: -1f,yellow.toFloatOrNull() ?: -1f,stage.toLongOrNull() ?: -1,hidden.toLongOrNull() ?: -1)
+        if(!candidate.valid()){saved=false;error="Impossibile salvare: le soglie devono essere crescenti e il sensore deve avere tre stadi prima della scomparsa.";return}
+        saving=true;saved=false;error=null
+        scope.launch{
+            val persisted=runCatching{onSettings(candidate)}.getOrDefault(false)
+            delay(150)
+            val reloaded=runCatching{loadSettings(context)}.getOrNull()
+            if(persisted&&reloaded==candidate){saved=true;error=null}else{saved=false;error="Impossibile salvare le impostazioni. Riprova."}
+            saving=false
+        }
+    }
+    Scaffold(
+        topBar={TopAppBar(title={Text("Impostazioni")},navigationIcon={IconButton(onClick=onBack){Icon(Icons.Default.ArrowBack,"Indietro")}})},
+        bottomBar={Surface(shadowElevation=8.dp){Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp),horizontalAlignment=Alignment.CenterHorizontally){
+            if(saved){Text("Impostazioni salvate",color=Color(0xFF166534),fontWeight=FontWeight.SemiBold);Spacer(Modifier.height(8.dp))}
+            Button(onClick=::save,enabled=!saving,modifier=Modifier.fillMaxWidth(),colors=if(saved)ButtonDefaults.buttonColors(containerColor=GREEN)else ButtonDefaults.buttonColors()){
+                Icon(if(saved)Icons.Default.Check else Icons.Default.Save,null);Spacer(Modifier.width(8.dp));Text(when{saving->"Salvataggio…";saved->"Salvato";else->"Salva impostazioni"})
+            }
+        }}},
+    ){padding->LazyColumn(Modifier.padding(padding).padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
         item { Text("Avatar",fontWeight=FontWeight.Bold,fontSize=20.sp); Text("La scelta cambia solo la grafica, non lo storico.",color=Color.Gray,fontSize=13.sp) }
         item { Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) { AvatarStyle.entries.forEach { style -> FilterChip(selected=avatar==style,onClick={onAvatar(style)},label={Text(style.label)},modifier=Modifier.weight(1f)) } } }
         item { Text("Tempi colori iniezione (ore)",fontWeight=FontWeight.Bold,fontSize=20.sp); Text("Rosso fino a, arancione fino a, giallo fino a; poi verde.",fontSize=13.sp,color=Color.Gray) }
-        item { TimingField("Rosso",red){red=it}; TimingField("Arancione",orange){orange=it}; TimingField("Giallo",yellow){yellow=it} }
+        item { TimingField("Rosso",red){red=it;saved=false;error=null}; TimingField("Arancione",orange){orange=it;saved=false;error=null}; TimingField("Giallo",yellow){yellow=it;saved=false;error=null} }
         item { Text("Tempi sensore (giorni)",fontWeight=FontWeight.Bold,fontSize=20.sp); Text("Ogni stadio dura il valore indicato; il sensore sparisce al giorno impostato.",fontSize=13.sp,color=Color.Gray) }
-        item { TimingField("Durata stadio",stage){stage=it}; TimingField("Scomparsa",hidden){hidden=it} }
+        item { TimingField("Durata stadio",stage){stage=it;saved=false;error=null}; TimingField("Scomparsa",hidden){hidden=it;saved=false;error=null} }
         error?.let { item { Text(it,color=MaterialTheme.colorScheme.error) } }
-        item { OutlinedButton(onClick={ red="12.0";orange="24.0";yellow="36.0";stage="10";hidden="40";onSettings(DefaultSettings);error=null },Modifier.fillMaxWidth()){Icon(Icons.Default.Restore,null);Spacer(Modifier.width(8.dp));Text("Ripristina valori predefiniti")} }
+        item { BackupSection(backupState){imported->red=imported.settings.redHours.toString();orange=imported.settings.orangeHours.toString();yellow=imported.settings.yellowHours.toString();stage=imported.settings.sensorStageDays.toString();hidden=imported.settings.sensorHiddenDays.toString();saved=false;error=null;onImported(imported)} }
+        item { OutlinedButton(onClick={ red="12.0";orange="24.0";yellow="36.0";stage="10";hidden="40";saved=false;if(onSettings(DefaultSettings))error=null else error="Impossibile ripristinare le impostazioni predefinite." },Modifier.fillMaxWidth(),enabled=!saving){Icon(Icons.Default.Restore,null);Spacer(Modifier.width(8.dp));Text("Ripristina valori predefiniti")} }
         item { Spacer(Modifier.height(72.dp)) }
-    } }
+    }}
 }
 @Composable private fun TimingField(label: String, value: String, onValue: (String)->Unit) = OutlinedTextField(value,onValue, label={Text(label)},singleLine=true, modifier=Modifier.fillMaxWidth())
+
+private data class PendingExport(val state: AppBackupState, val password: CharArray)
+private data class PendingImport(val backup: DecodedBackup, val password: CharArray)
+private enum class ImportChoice { MERGE, REPLACE }
+
+@Composable private fun BackupSection(currentState: ()->AppBackupState, onImported: (AppBackupState)->Unit) {
+    val context=LocalContext.current;val scope=rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) };var message by remember { mutableStateOf<String?>(null) };var messageIsError by remember { mutableStateOf(false) }
+    var exportDialog by remember { mutableStateOf(false) };var importPasswordDialog by remember { mutableStateOf(false) };var exportPassword by remember { mutableStateOf("") };var exportConfirmation by remember { mutableStateOf("") };var importPassword by remember { mutableStateOf("") }
+    var pendingExport by remember { mutableStateOf<PendingExport?>(null) };var importUri by remember { mutableStateOf<Uri?>(null) };var pendingImport by remember { mutableStateOf<PendingImport?>(null) };var importChoice by remember { mutableStateOf(ImportChoice.MERGE) };var replaceConfirmation by remember { mutableStateOf(false) }
+    fun finishImport(choice:ImportChoice){
+        val pending=pendingImport?:return;val before=currentState();busy=true;message=null
+        scope.launch{
+            val result=withContext(Dispatchers.IO){runCatching{BackupManager.applyImport(context,before,pending.backup,choice==ImportChoice.REPLACE,pending.password)}}
+            pending.password.fill('\u0000');pendingImport=null;replaceConfirmation=false;busy=false
+            result.onSuccess{outcome->onImported(outcome.state);message="Backup importato: ${outcome.importedCount} elementi importati";messageIsError=false}.onFailure{message=it.message?:"Impossibile importare il backup.";messageIsError=true}
+        }
+    }
+    val exportLauncher=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")){uri->
+        val pending=pendingExport;pendingExport=null
+        if(uri==null){pending?.password?.fill('\u0000')}else if(pending!=null){busy=true;message=null;scope.launch{val result=withContext(Dispatchers.IO){runCatching{context.contentResolver.openOutputStream(uri,"w")?.use{BackupManager.write(context,it,pending.state,pending.password)}?:error("Impossibile aprire il file selezionato.")}};pending.password.fill('\u0000');busy=false;result.onSuccess{message="Backup esportato";messageIsError=false}.onFailure{message=it.message?:"Impossibile esportare il backup.";messageIsError=true}}}
+    }
+    val importLauncher=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()){uri->if(uri!=null){runCatching{context.contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)};importUri=uri;importPassword="";importPasswordDialog=true}}
+    Column(verticalArrangement=Arrangement.spacedBy(10.dp)){
+        HorizontalDivider();Text("Backup dei dati",fontWeight=FontWeight.Bold,fontSize=20.sp);Text("Il file protetto consente di trasferire storico, sensori e impostazioni su un altro dispositivo.",fontSize=13.sp,color=Color.Gray)
+        Button(onClick={exportPassword="";exportConfirmation="";exportDialog=true},enabled=!busy,modifier=Modifier.fillMaxWidth()){Icon(Icons.Default.UploadFile,null);Spacer(Modifier.width(8.dp));Text("Esporta backup")}
+        OutlinedButton(onClick={importLauncher.launch(arrayOf("application/octet-stream","application/json"))},enabled=!busy,modifier=Modifier.fillMaxWidth()){Icon(Icons.Default.Download,null);Spacer(Modifier.width(8.dp));Text("Importa backup")}
+        if(busy){Text("Operazione in corso…",color=Blue,fontWeight=FontWeight.SemiBold)}
+        message?.let{Text(it,color=if(messageIsError)MaterialTheme.colorScheme.error else Color(0xFF166534),fontWeight=FontWeight.SemiBold)}
+    }
+    if(exportDialog) PasswordDialog("Proteggi il backup","Scegli una password di almeno 8 caratteri.",exportPassword,{exportPassword=it},exportConfirmation,{exportConfirmation=it},{exportDialog=false;exportPassword="";exportConfirmation=""}){
+        when{exportPassword.length<8->{message="La password del backup deve contenere almeno 8 caratteri.";messageIsError=true};exportPassword!=exportConfirmation->{message="Le password del backup non coincidono.";messageIsError=true};else->{pendingExport=PendingExport(currentState(),exportPassword.toCharArray());exportPassword="";exportConfirmation="";exportDialog=false;exportLauncher.launch("InSofina-backup-${SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date())}.insofia-backup")}}
+    }
+    if(importPasswordDialog) PasswordDialog("Apri il backup","Inserisci la password usata per proteggere il file.",importPassword,{importPassword=it},null,null,{importPasswordDialog=false;importPassword="";importUri=null}){
+        val uri=importUri?:return@PasswordDialog;if(importPassword.isEmpty()){message="Inserisci la password del backup.";messageIsError=true}else{val password=importPassword.toCharArray();importPassword="";importPasswordDialog=false;busy=true;scope.launch{val result=withContext(Dispatchers.IO){runCatching{context.contentResolver.openInputStream(uri)?.use{BackupManager.read(it,password)}?:error("Impossibile aprire il file selezionato.")}};busy=false;result.onSuccess{decoded->pendingImport=PendingImport(decoded,password);importChoice=ImportChoice.MERGE}.onFailure{password.fill('\u0000');message=it.message?:"Backup corrotto, incompatibile o password errata.";messageIsError=true};importUri=null}}
+    }
+    pendingImport?.let{pending->AlertDialog(onDismissRequest={pending.password.fill('\u0000');pendingImport=null},title={Text("Anteprima backup")},text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){Text("Data: ${SimpleDateFormat("dd/MM/yyyy HH:mm",Locale.getDefault()).format(Date(pending.backup.exportedAt))}");Text("Storico: ${pending.backup.state.records.size} elementi");Text("Sensori: ${pending.backup.state.records.count{it.mode==EntryMode.SENSORE}}");Row(verticalAlignment=Alignment.CenterVertically){RadioButton(importChoice==ImportChoice.MERGE,{importChoice=ImportChoice.MERGE});Text("Unisci con i dati esistenti")};Row(verticalAlignment=Alignment.CenterVertically){RadioButton(importChoice==ImportChoice.REPLACE,{importChoice=ImportChoice.REPLACE});Text("Sostituisci tutti i dati")}}},confirmButton={TextButton(onClick={if(importChoice==ImportChoice.REPLACE)replaceConfirmation=true else finishImport(ImportChoice.MERGE)}){Text("Importa")}},dismissButton={TextButton(onClick={pending.password.fill('\u0000');pendingImport=null}){Text("Annulla")}})}
+    if(replaceConfirmation) AlertDialog(onDismissRequest={replaceConfirmation=false},title={Text("Sostituire tutti i dati?")},text={Text("Storico e impostazioni locali saranno sostituiti. Prima dell'operazione verrà creato automaticamente un backup di sicurezza privato.")},confirmButton={TextButton(onClick={finishImport(ImportChoice.REPLACE)}){Text("Sostituisci")}},dismissButton={TextButton(onClick={replaceConfirmation=false}){Text("Annulla")}})
+}
+
+@Composable private fun PasswordDialog(title:String,description:String,password:String,onPassword:(String)->Unit,confirmation:String?,onConfirmation:((String)->Unit)?,onDismiss:()->Unit,onConfirm:()->Unit)=AlertDialog(onDismissRequest=onDismiss,title={Text(title)},text={Column(verticalArrangement=Arrangement.spacedBy(10.dp)){Text(description);OutlinedTextField(password,onPassword,label={Text("Password")},singleLine=true,visualTransformation=PasswordVisualTransformation());if(confirmation!=null&&onConfirmation!=null)OutlinedTextField(confirmation,onConfirmation,label={Text("Conferma password")},singleLine=true,visualTransformation=PasswordVisualTransformation())}},confirmButton={TextButton(onClick=onConfirm){Text("Continua")}},dismissButton={TextButton(onClick=onDismiss){Text("Annulla")}})
