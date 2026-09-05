@@ -1,10 +1,12 @@
 package com.example.injectionsites
 
+import android.app.DatePickerDialog
 import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
+import android.widget.NumberPicker
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -42,6 +44,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.IntOffset
@@ -72,9 +75,19 @@ private const val SETTINGS_KEY = "timing_settings"; internal const val AVATAR_KE
 internal fun loadSettings(context: Context) = context.getSharedPreferences(STORAGE, Context.MODE_PRIVATE).let { p -> TimingSettings(p.getFloat("red",12f),p.getFloat("orange",24f),p.getFloat("yellow",36f),p.getLong("sensorStage",10),p.getLong("sensorHidden",40)).takeIf { it.valid() } ?: DefaultSettings }
 private fun saveSettings(context: Context, value: TimingSettings): Boolean = context.getSharedPreferences(STORAGE, Context.MODE_PRIVATE).edit().putFloat("red",value.redHours).putFloat("orange",value.orangeHours).putFloat("yellow",value.yellowHours).putLong("sensorStage",value.sensorStageDays).putLong("sensorHidden",value.sensorHiddenDays).commit()
 private val RED = Color(0xFFDC2626); private val ORANGE = Color(0xFFF97316); private val YELLOW = Color(0xFFEAB308); private val GREEN = Color(0xFF16A34A)
+internal fun sensorVisualStage(eventDateTime: Long, now: Long = System.currentTimeMillis(), settings: TimingSettings = currentSettings): Int? {
+    val days = ((now - eventDateTime).coerceAtLeast(0L)) / 86_400_000L
+    return when {
+        days < settings.sensorStageDays -> 0
+        days < settings.sensorStageDays * 2 -> 1
+        days < settings.sensorStageDays * 3 -> 2
+        days < settings.sensorHiddenDays -> 3
+        else -> null
+    }
+}
 private object SensorLifecycle {
     val DARK = Color(0xFF475569); val MEDIUM = Color(0xFF7C8796); val LIGHT = Color(0xFFB8C0CB); val FADED = Color(0xFFDEE3EA)
-    fun colorAt(time: Long, now: Long = System.currentTimeMillis()): Color? { val days=((now-time).coerceAtLeast(0L))/86_400_000L; return when { days < currentSettings.sensorStageDays -> DARK; days < currentSettings.sensorStageDays * 2 -> MEDIUM; days < currentSettings.sensorStageDays * 3 -> LIGHT; days < currentSettings.sensorHiddenDays -> FADED; else -> null } }
+    fun colorAt(eventDateTime: Long, now: Long = System.currentTimeMillis()): Color? = when (sensorVisualStage(eventDateTime, now)) { 0 -> DARK; 1 -> MEDIUM; 2 -> LIGHT; 3 -> FADED; else -> null }
 }
 class MainActivity : ComponentActivity() { override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { MaterialTheme(colorScheme = lightColorScheme(primary = Blue)) { InjectionApp() } } } }
 enum class EntryMode(val label: String) { INSULINA("Insulina"), SENSORE("Sensore") }
@@ -127,28 +140,33 @@ data class RecordItem(
     val zone: Int,
     val mode: EntryMode,
     val insulinType: InsulinType?,
-    /** Time of the event selected by the user. */
-    val time: Long = System.currentTimeMillis(),
-    /** Keeps the most recently entered sensor active even when it is backdated. */
+    /** Date and time of the event selected by the user. */
+    val eventDateTime: Long = System.currentTimeMillis(),
+    /** Technical insertion timestamp, used only to break ties. */
     val createdAt: Long = System.currentTimeMillis(),
     val id: String = UUID.randomUUID().toString()
-)
+) {
+    /** Compatibility alias for the existing persisted and backup schema. */
+    val time: Long get() = eventDateTime
+}
 
 internal const val STORAGE = "injection_sites"; internal const val HISTORY_KEY = "injection_history"; internal const val LEGACY_SENSOR_KEY = "sensor_position"
-internal fun RecordItem.toJson() = JSONObject().apply { put("id",id);put("area", area.name); put("zone", zone); put("mode", mode.name); put("insulinType", insulinType?.name); put("time", time); put("createdAt", createdAt) }
+internal fun RecordItem.toJson() = JSONObject().apply { put("id",id);put("area", area.name); put("zone", zone); put("mode", mode.name); put("insulinType", insulinType?.name); put("time", eventDateTime); put("createdAt", createdAt) }
 internal fun recordFromJson(json: JSONObject): RecordItem? = runCatching {
-    val time=json.getLong("time");val area=BodyArea.valueOf(json.getString("area"));val zone=json.getInt("zone");val mode=EntryMode.valueOf(json.getString("mode"));val insulin=json.optString("insulinType").takeIf { it.isNotBlank()&&it!="null" }?.let(InsulinType::valueOf);val createdAt=json.optLong("createdAt",time)
-    val id=json.optString("id").takeIf { it.isNotBlank() } ?: UUID.nameUUIDFromBytes("${area.name}|$zone|${mode.name}|${insulin?.name}|$time|$createdAt".toByteArray()).toString()
-    RecordItem(area,zone,mode,insulin,time,createdAt,id)
+    val eventDateTime=if(json.has("eventDateTime"))json.getLong("eventDateTime")else json.getLong("time");val area=BodyArea.valueOf(json.getString("area"));val zone=json.getInt("zone");val mode=EntryMode.valueOf(json.getString("mode"));val insulin=json.optString("insulinType").takeIf { it.isNotBlank()&&it!="null" }?.let(InsulinType::valueOf);val createdAt=json.optLong("createdAt",eventDateTime)
+    val id=json.optString("id").takeIf { it.isNotBlank() } ?: UUID.nameUUIDFromBytes("${area.name}|$zone|${mode.name}|${insulin?.name}|$eventDateTime|$createdAt".toByteArray()).toString()
+    RecordItem(area,zone,mode,insulin,eventDateTime,createdAt,id)
 }.getOrNull()
+private val eventDateTimeDescending = compareByDescending<RecordItem> { it.eventDateTime }.thenByDescending { it.createdAt }
+internal fun orderedRecords(records: List<RecordItem>) = records.sortedWith(eventDateTimeDescending)
 internal fun loadRecords(context: Context): List<RecordItem> = runCatching {
     val preferences = context.getSharedPreferences(STORAGE, Context.MODE_PRIVATE)
     val records = JSONArray(preferences.getString(HISTORY_KEY, "[]")).let { data -> (0 until data.length()).mapNotNull { recordFromJson(data.getJSONObject(it)) } }.toMutableList()
-    preferences.getString(LEGACY_SENSOR_KEY, null)?.let { raw -> recordFromJson(JSONObject(raw))?.takeIf { legacy -> records.none { it.mode == EntryMode.SENSORE && it.time == legacy.time } }?.let(records::add) }
-    records.sortedByDescending { it.time }
+    preferences.getString(LEGACY_SENSOR_KEY, null)?.let { raw -> recordFromJson(JSONObject(raw))?.takeIf { legacy -> records.none { it.mode == EntryMode.SENSORE && it.eventDateTime == legacy.eventDateTime } }?.let(records::add) }
+    orderedRecords(records)
 }.getOrDefault(emptyList())
 private fun saveRecords(context: Context, records: List<RecordItem>) { val data = JSONArray(); records.forEach { data.put(it.toJson()) }; context.getSharedPreferences(STORAGE, Context.MODE_PRIVATE).edit().putString(HISTORY_KEY, data.toString()).remove(LEGACY_SENSOR_KEY).apply() }
-private fun activeSensor(records: List<RecordItem>): RecordItem? = records.filter { it.mode == EntryMode.SENSORE }.maxByOrNull { it.createdAt }
+internal fun activeSensor(records: List<RecordItem>): RecordItem? = records.filter { it.mode == EntryMode.SENSORE }.maxWithOrNull(compareBy<RecordItem> { it.eventDateTime }.thenBy { it.createdAt })
 
 @Composable fun InjectionApp() {
     val context = LocalContext.current; var screen by remember { mutableStateOf("home") }; var area by remember { mutableStateOf<BodyArea?>(null) }
@@ -159,7 +177,7 @@ private fun activeSensor(records: List<RecordItem>): RecordItem? = records.filte
     fun persist() = saveRecords(context, records)
     when (screen) {
         "home" -> key(refreshTick, avatar, settings) { HomeScreen(records, activeSensor(records), avatar, { area = it; screen = "area" }, { screen = "history" }, { screen = "settings" }) }
-        "area" -> area?.let { selected -> AreaScreen(selected, records, activeSensor(records), avatar, { record -> records.add(0, record); persist() }) { screen = "home" } }
+        "area" -> area?.let { selected -> AreaScreen(selected, records, activeSensor(records), avatar, { record -> records.add(record);records.sortWith(eventDateTimeDescending);persist() }) { screen = "home" } }
         "settings" -> SettingsScreen(avatar, settings, { avatar = it; context.getSharedPreferences(STORAGE, Context.MODE_PRIVATE).edit().putString(AVATAR_KEY, it.name).apply() }, { candidate -> saveSettings(context,candidate).also { saved -> if(saved) settings=candidate } }, { AppBackupState(records.toList(),settings,avatar) }, { imported -> records.clear();records.addAll(imported.records);settings=imported.settings;avatar=imported.avatar }) { screen = "home" }
         else -> HistoryScreen(records, { record -> records.remove(record); persist() }) { screen = "home" }
     }
@@ -169,17 +187,17 @@ private fun activeSensor(records: List<RecordItem>): RecordItem? = records.filte
 @Composable private fun HomeScreen(records: List<RecordItem>, sensor: RecordItem?, avatar: AvatarStyle, onArea: (BodyArea) -> Unit, onHistory: () -> Unit, onSettings: () -> Unit) = Scaffold(topBar = { TopAppBar(title = { Column { Text("Nuova iniezione", fontWeight = FontWeight.Bold); Text("Seleziona una zona sulla sagoma", fontSize = 12.sp, color = Color.Gray) } }, actions = { IconButton(onClick = onHistory) { Icon(Icons.Default.History, "Storico") }; IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, "Impostazioni") } }) }) { padding -> LazyColumn(Modifier.padding(padding).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) { item { BodyMap(records, sensor, avatar, onArea) }; item { AvailabilityLegend() }; item { Text("Tutte le aree", fontWeight = FontWeight.Bold, fontSize = 18.sp) }; itemsIndexed(BodyArea.entries) { _, bodyArea -> AreaCard(bodyArea) { onArea(bodyArea) } }; item { Spacer(Modifier.height(20.dp)) } } }
 @Composable private fun AvailabilityLegend() = Card(colors = CardDefaults.cardColors(containerColor = SurfaceTint)) { Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Disponibilità:", fontWeight = FontWeight.Bold, fontSize = 13.sp); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) { LegendDot(RED, "< ${currentSettings.redHours} h", Modifier.weight(1f)); LegendDot(ORANGE, "${currentSettings.redHours}–${currentSettings.orangeHours} h", Modifier.weight(1f)) }; Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) { LegendDot(YELLOW, "${currentSettings.orangeHours}–${currentSettings.yellowHours} h", Modifier.weight(1f)); LegendDot(GREEN, "> ${currentSettings.yellowHours} h", Modifier.weight(1f)) } } }
 @Composable private fun LegendDot(color: Color, text: String, modifier: Modifier = Modifier) = Row(modifier, verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(9.dp).background(color, CircleShape)); Spacer(Modifier.width(4.dp)); Text(text, fontSize = 11.sp, maxLines = 1) }
-private fun zoneColor(area: BodyArea, index: Int, records: List<RecordItem>): Color { val last = records.filter { it.mode == EntryMode.INSULINA && it.area == area && it.zone == index }.maxByOrNull { it.time } ?: return GREEN; val hours = (System.currentTimeMillis() - last.time).coerceAtLeast(0) / 3_600_000f; return when { hours < currentSettings.redHours -> RED; hours < currentSettings.orangeHours -> ORANGE; hours < currentSettings.yellowHours -> YELLOW; else -> GREEN } }
+private fun zoneColor(area: BodyArea, index: Int, records: List<RecordItem>): Color { val last = records.filter { it.mode == EntryMode.INSULINA && it.area == area && it.zone == index }.maxByOrNull { it.eventDateTime } ?: return GREEN; val hours = (System.currentTimeMillis() - last.eventDateTime).coerceAtLeast(0) / 3_600_000f; return when { hours < currentSettings.redHours -> RED; hours < currentSettings.orangeHours -> ORANGE; hours < currentSettings.yellowHours -> YELLOW; else -> GREEN } }
 @Composable private fun AreaCard(area: BodyArea, onClick: () -> Unit) = Card(Modifier.fillMaxWidth().clickable(onClick = onClick), colors = CardDefaults.cardColors(containerColor = area.color.copy(alpha = .08f))) { Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(14.dp).background(area.color, CircleShape)); Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(area.label, fontWeight = FontWeight.Bold); Text("${area.zones.size} zone selezionabili", fontSize = 12.sp, color = Color.Gray) }; Icon(Icons.Default.ChevronRight, null, tint = Blue) } }
 @Composable private fun BodyMap(records: List<RecordItem>, sensor: RecordItem?, avatar: AvatarStyle, onArea: (BodyArea) -> Unit) = Card(colors = CardDefaults.cardColors(containerColor = SurfaceTint)) { Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) { Text("Vista a specchio", fontWeight = FontWeight.Bold, fontSize = 18.sp); Text("Tocca un gruppo di zone per ingrandirlo", fontSize = 12.sp, color = Color.Gray); FrontBodyCanvas(records, sensor, avatar, onArea); HorizontalDivider(Modifier.padding(vertical = 4.dp)); Text("Vista posteriore · glutei", fontWeight = FontWeight.SemiBold, fontSize = 13.sp); GluteCanvas(records, sensor, avatar, onArea) } }
 
 private data class Hit(val rect: Rect, val area: BodyArea, val zone: Int)
-private fun sensorMarkers(records: List<RecordItem>, active: RecordItem?, hit: Hit): List<Pair<Color, Boolean>> = records.asSequence().filter { it.mode == EntryMode.SENSORE && it.area == hit.area && it.zone == hit.zone }.sortedByDescending { it.createdAt }.mapNotNull { record -> SensorLifecycle.colorAt(record.time)?.let { color -> color to (record === active || record == active) } }.take(3).toList()
-private data class ImagePlacement(val left: Int, val top: Int, val width: Int, val height: Int) {
+private fun sensorMarkers(records: List<RecordItem>, active: RecordItem?, hit: Hit): List<Pair<Color, Boolean>> = records.asSequence().filter { it.mode == EntryMode.SENSORE && it.area == hit.area && it.zone == hit.zone }.sortedWith(eventDateTimeDescending).mapNotNull { record -> SensorLifecycle.colorAt(record.eventDateTime)?.let { color -> color to (record === active || record == active) } }.take(3).toList()
+internal data class ImagePlacement(val left: Int, val top: Int, val width: Int, val height: Int) {
     fun point(normalized: Offset) = Offset(left + normalized.x * width, top + normalized.y * height)
 }
 private data class DashboardZone(val path: Path, val bounds: Rect, val area: BodyArea, val zone: Int)
-private fun fitImage(imageWidth: Int, imageHeight: Int, canvas: Size): ImagePlacement {
+internal fun fitImage(imageWidth: Int, imageHeight: Int, canvas: Size): ImagePlacement {
     val scale = minOf(canvas.width / imageWidth, canvas.height / imageHeight)
     val width = (imageWidth * scale).roundToInt(); val height = (imageHeight * scale).roundToInt()
     return ImagePlacement(((canvas.width - width) / 2f).roundToInt(), ((canvas.height - height) / 2f).roundToInt(), width, height)
@@ -263,14 +281,32 @@ private fun DrawScope.drawDashboardZone(zone: DashboardZone, records: List<Recor
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable private fun AreaScreen(area: BodyArea, records: List<RecordItem>, sensor: RecordItem?, avatar: AvatarStyle, onSaved: (RecordItem) -> Unit, onBack: () -> Unit) {
     var mode by remember { mutableStateOf(EntryMode.INSULINA) }; var insulinType by remember { mutableStateOf(InsulinType.RAPIDA) }; var zone by remember { mutableStateOf<Int?>(null) }; var saved by remember { mutableStateOf(false) }
-    var date by remember { mutableStateOf(formatDate(System.currentTimeMillis())) }; var hour by remember { mutableStateOf(formatTime(System.currentTimeMillis())) }; var error by remember { mutableStateOf<String?>(null) }; var pending by remember { mutableStateOf<RecordItem?>(null) }
-    fun prepareSave() { val selected=zone ?: return; val eventTime=parseDateTime(date,hour); if(eventTime==null) { error="Inserisci data (GG/MM/AAAA) e ora (HH:mm) valide."; return }; val item=RecordItem(area,selected,mode,if(mode==EntryMode.INSULINA) insulinType else null,eventTime); if(eventTime > System.currentTimeMillis()) pending=item else { onSaved(item); saved=true; error=null } }
+    var eventDateTime by remember { mutableLongStateOf(Calendar.getInstance().apply { set(Calendar.SECOND,0);set(Calendar.MILLISECOND,0) }.timeInMillis) }; var error by remember { mutableStateOf<String?>(null) }; var pending by remember { mutableStateOf<RecordItem?>(null) }
+    fun prepareSave() { val selected=zone ?: return; val item=RecordItem(area,selected,mode,if(mode==EntryMode.INSULINA) insulinType else null,eventDateTime); if(eventDateTime > System.currentTimeMillis()) pending=item else { onSaved(item); saved=true; error=null } }
     if(pending != null) AlertDialog(onDismissRequest={pending=null},title={Text("Data futura")},text={Text("La data e l'ora selezionate sono nel futuro. Vuoi salvare comunque?")},confirmButton={TextButton(onClick={pending?.let(onSaved); pending=null; saved=true; error=null}){Text("Salva")}},dismissButton={TextButton(onClick={pending=null}){Text("Annulla")}})
-    Scaffold(topBar = { TopAppBar(title = { Text(area.label, fontWeight = FontWeight.Bold) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack,"Indietro") } }) }, bottomBar = { Surface(shadowElevation = 8.dp) { Button(onClick = ::prepareSave, enabled = zone != null, modifier = Modifier.fillMaxWidth().padding(16.dp)) { Icon(Icons.Default.Save,null); Spacer(Modifier.width(8.dp)); Text("Salva posizione") } } }) { padding -> LazyColumn(Modifier.padding(padding).padding(horizontal=16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) { item { Text("Zoom dedicato · ${area.zones.size} zone",color=Blue,fontWeight=FontWeight.SemiBold); ModePicker(mode,{mode=it},insulinType,{insulinType=it}); EventDateTimeFields(date,{date=it},hour,{hour=it}); error?.let { Text(it,color=MaterialTheme.colorScheme.error) } }; item { Text("Tocca una zona",fontWeight=FontWeight.Bold,fontSize=18.sp); ZoomBodyDiagram(area,zone,records,sensor,avatar) { zone=it; saved=false } }; itemsIndexed(area.zones) { index,name -> ZoneRow(index,name,zone==index,zoneColor(area,index,records),sensorMarkers(records,sensor,Hit(Rect.Zero,area,index)).isNotEmpty()) { zone=index; saved=false } }; if(saved) item { Text(if(mode==EntryMode.INSULINA) "Iniezione salvata." else "Sensore salvato.",color=Color(0xFF166534),fontWeight=FontWeight.SemiBold,modifier=Modifier.padding(bottom=76.dp)) } else item { Spacer(Modifier.height(76.dp)) } } }
+    Scaffold(topBar = { TopAppBar(title = { Text(area.label, fontWeight = FontWeight.Bold) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack,"Indietro") } }) }, bottomBar = { Surface(shadowElevation = 8.dp) { Button(onClick = ::prepareSave, enabled = zone != null, modifier = Modifier.fillMaxWidth().padding(16.dp)) { Icon(Icons.Default.Save,null); Spacer(Modifier.width(8.dp)); Text("Salva posizione") } } }) { padding -> LazyColumn(Modifier.padding(padding).padding(horizontal=16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) { item { Text("Zoom dedicato · ${area.zones.size} zone",color=Blue,fontWeight=FontWeight.SemiBold); ModePicker(mode,{mode=it},insulinType,{insulinType=it}); EventDateTimeFields(eventDateTime){eventDateTime=it;saved=false;error=null}; error?.let { Text(it,color=MaterialTheme.colorScheme.error) } }; item { Text("Tocca una zona",fontWeight=FontWeight.Bold,fontSize=18.sp); ZoomBodyDiagram(area,zone,records,sensor,avatar) { zone=it; saved=false } }; itemsIndexed(area.zones) { index,_ -> ZoneRow(index,displayZoneName(area,index),zone==index,zoneColor(area,index,records),sensorMarkers(records,sensor,Hit(Rect.Zero,area,index)).isNotEmpty()) { zone=index; saved=false } }; if(saved) item { Text(if(mode==EntryMode.INSULINA) "Iniezione salvata." else "Sensore salvato.",color=Color(0xFF166534),fontWeight=FontWeight.SemiBold,modifier=Modifier.padding(bottom=76.dp)) } else item { Spacer(Modifier.height(76.dp)) } } }
 }
-private fun formatDate(time: Long) = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(time)); private fun formatTime(time: Long) = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(time))
-private fun parseDateTime(date: String, hour: String): Long? = runCatching { SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).apply { isLenient=false }.parse("$date $hour")?.time }.getOrNull()
-@Composable private fun EventDateTimeFields(date: String,onDate: (String)->Unit,hour: String,onHour: (String)->Unit) = Column { Text("Quando è avvenuto l'evento",fontWeight=FontWeight.Bold); Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { OutlinedTextField(date,onDate,label={Text("Data")},placeholder={Text("GG/MM/AAAA")},singleLine=true,modifier=Modifier.weight(1.35f)); OutlinedTextField(hour,onHour,label={Text("Ora")},placeholder={Text("HH:mm")},singleLine=true,modifier=Modifier.weight(.8f)) } }
+private fun formatDate(time: Long) = SimpleDateFormat("dd/MM/yyyy", Locale.ITALIAN).format(Date(time)); private fun formatTime(time: Long) = SimpleDateFormat("HH:mm", Locale.ITALIAN).format(Date(time))
+internal fun displayZoneName(area: BodyArea,index: Int): String {
+    val stored=area.zones[index]
+    if(area!=BodyArea.ABDOMEN)return stored
+    return if(index%4<2)stored.replace("destra","sinistra") else stored.replace("sinistra","destra")
+}
+@Composable private fun EventDateTimeFields(eventDateTime: Long,onChange: (Long)->Unit) {
+    val context=LocalContext.current;var showTimePicker by remember { mutableStateOf(false) }
+    fun calendar()=Calendar.getInstance().apply { timeInMillis=eventDateTime }
+    fun showDatePicker(){val initial=calendar();DatePickerDialog(context,{_,year,month,day->onChange(calendar().apply{set(Calendar.YEAR,year);set(Calendar.MONTH,month);set(Calendar.DAY_OF_MONTH,day);set(Calendar.SECOND,0);set(Calendar.MILLISECOND,0)}.timeInMillis)},initial.get(Calendar.YEAR),initial.get(Calendar.MONTH),initial.get(Calendar.DAY_OF_MONTH)).show()}
+    Column(verticalArrangement=Arrangement.spacedBy(8.dp)){Text("Quando è avvenuto l'evento",fontWeight=FontWeight.Bold);Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+        OutlinedCard(onClick=::showDatePicker,modifier=Modifier.weight(1.35f)){Column(Modifier.padding(horizontal=14.dp,vertical=10.dp)){Text("Data",fontSize=12.sp,color=Color.Gray);Text(formatDate(eventDateTime),fontWeight=FontWeight.SemiBold)}}
+        OutlinedCard(onClick={showTimePicker=true},modifier=Modifier.weight(.8f)){Column(Modifier.padding(horizontal=14.dp,vertical=10.dp)){Text("Ora",fontSize=12.sp,color=Color.Gray);Text(formatTime(eventDateTime),fontWeight=FontWeight.SemiBold)}}
+    }}
+    if(showTimePicker) TimeWheelDialog(eventDateTime,{showTimePicker=false},{selectedHour,selectedMinute->onChange(calendar().apply{set(Calendar.HOUR_OF_DAY,selectedHour);set(Calendar.MINUTE,selectedMinute);set(Calendar.SECOND,0);set(Calendar.MILLISECOND,0)}.timeInMillis);showTimePicker=false})
+}
+@Composable private fun TimeWheelDialog(eventDateTime:Long,onDismiss:()->Unit,onConfirm:(Int,Int)->Unit){
+    val initial=remember(eventDateTime){Calendar.getInstance().apply{timeInMillis=eventDateTime}};var selectedHour by remember(eventDateTime){mutableIntStateOf(initial.get(Calendar.HOUR_OF_DAY))};var selectedMinute by remember(eventDateTime){mutableIntStateOf(initial.get(Calendar.MINUTE))}
+    AlertDialog(onDismissRequest=onDismiss,title={Text("Seleziona l'ora")},text={Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(10.dp)){Text(String.format(Locale.ITALIAN,"%02d:%02d",selectedHour,selectedMinute),fontSize=28.sp,fontWeight=FontWeight.Bold);Row(horizontalArrangement=Arrangement.spacedBy(24.dp)){TimeWheel(0,23,selectedHour){selectedHour=it};TimeWheel(0,59,selectedMinute){selectedMinute=it}}}},confirmButton={TextButton(onClick={onConfirm(selectedHour,selectedMinute)}){Text("Conferma")}},dismissButton={TextButton(onClick=onDismiss){Text("Annulla")}})
+}
+@Composable private fun TimeWheel(min:Int,max:Int,value:Int,onValue:(Int)->Unit)=AndroidView(factory={context->NumberPicker(context).apply{minValue=min;maxValue=max;wrapSelectorWheel=true;descendantFocusability=NumberPicker.FOCUS_BLOCK_DESCENDANTS;setFormatter{String.format(Locale.ITALIAN,"%02d",it)};setOnValueChangedListener{_,_,new->onValue(new)}}},update={it.value=value},modifier=Modifier.width(88.dp).height(150.dp))
 @Composable private fun ModePicker(mode: EntryMode,setMode: (EntryMode)->Unit,insulin: InsulinType,setInsulin: (InsulinType)->Unit) = Column(verticalArrangement=Arrangement.spacedBy(6.dp)) { Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { EntryMode.entries.forEach { FilterChip(selected=mode==it,onClick={setMode(it)},label={Text(it.label)}) } }; if(mode==EntryMode.INSULINA) Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { InsulinType.entries.forEach { FilterChip(selected=insulin==it,onClick={setInsulin(it)},label={Text(it.label)}) } } }
 @Composable private fun ZoneRow(index: Int,name: String,selected: Boolean,color: Color,hasSensor: Boolean,onClick: ()->Unit) = Card(Modifier.fillMaxWidth().clickable(onClick=onClick),colors=CardDefaults.cardColors(containerColor=if(selected) color.copy(alpha=.18f) else SurfaceTint)) { Row(Modifier.padding(12.dp),verticalAlignment=Alignment.CenterVertically) { Box(Modifier.size(30.dp).background(color,CircleShape),contentAlignment=Alignment.Center) { Text("${index+1}",color=Color.White,fontWeight=FontWeight.Bold) }; Spacer(Modifier.width(12.dp)); Text(name,Modifier.weight(1f)); if(hasSensor) { Box(Modifier.size(18.dp).background(SensorLifecycle.DARK,CircleShape)); Spacer(Modifier.width(8.dp)) }; if(selected) Icon(Icons.Default.CheckCircle,null,tint=GREEN) } }
 @Composable private fun ZoomBodyDiagram(area: BodyArea,selected: Int?,records: List<RecordItem>,sensor: RecordItem?,avatar: AvatarStyle,onSelect: (Int)->Unit) = Box(Modifier.fillMaxWidth().aspectRatio(300f / 310f).background(SurfaceTint,RoundedCornerShape(20.dp))) {
@@ -329,7 +365,7 @@ private fun gluteOutline(a:AvatarStyle,left:Boolean):List<Offset>{
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable private fun HistoryScreen(records: List<RecordItem>, onDelete: (RecordItem)->Unit, onBack: ()->Unit) { val formatter=remember { SimpleDateFormat("dd/MM/yyyy HH:mm",Locale.getDefault()) }; var deleting by remember { mutableStateOf<RecordItem?>(null) }; deleting?.let { record -> AlertDialog(onDismissRequest={deleting=null},title={Text("Eliminare registrazione?")},text={Text("Questa operazione non può essere annullata.")},confirmButton={TextButton(onClick={onDelete(record);deleting=null}){Text("Elimina")}},dismissButton={TextButton(onClick={deleting=null}){Text("Annulla")}}) }; Scaffold(topBar={ TopAppBar(title={Text("Storico")},navigationIcon={IconButton(onClick=onBack){Icon(Icons.Default.ArrowBack,"Indietro")}}) }) { padding -> if(records.isEmpty()) Box(Modifier.fillMaxSize().padding(padding),contentAlignment=Alignment.Center){Text("Nessuna registrazione",color=Color.Gray)} else LazyColumn(Modifier.padding(padding).padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){itemsIndexed(records){_,record->Card(Modifier.fillMaxWidth(), colors=CardDefaults.cardColors(containerColor=when { record.mode == EntryMode.SENSORE -> Color(0xFFE5E7EB); record.insulinType == InsulinType.RAPIDA -> Color(0xFFE5F5E9); else -> Color(0xFFF0E6FA) })){Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically){Column(Modifier.weight(1f)){Text(record.area.label,fontWeight=FontWeight.Bold);Text("${record.area.zones[record.zone]} · ${record.mode.label}");record.insulinType?.let{Text(it.label,color=it.color,fontWeight=FontWeight.SemiBold)};Text(formatter.format(Date(record.time)),fontSize=12.sp,color=Color.Gray)};IconButton(onClick={deleting=record}){Icon(Icons.Default.Delete,"Elimina registrazione",tint=MaterialTheme.colorScheme.error)}}}}} } }
+@Composable private fun HistoryScreen(records: List<RecordItem>, onDelete: (RecordItem)->Unit, onBack: ()->Unit) { val formatter=remember { SimpleDateFormat("dd/MM/yyyy HH:mm",Locale.ITALIAN) }; var deleting by remember { mutableStateOf<RecordItem?>(null) }; deleting?.let { record -> AlertDialog(onDismissRequest={deleting=null},title={Text("Eliminare registrazione?")},text={Text("Questa operazione non può essere annullata.")},confirmButton={TextButton(onClick={onDelete(record);deleting=null}){Text("Elimina")}},dismissButton={TextButton(onClick={deleting=null}){Text("Annulla")}}) }; Scaffold(topBar={ TopAppBar(title={Text("Storico")},navigationIcon={IconButton(onClick=onBack){Icon(Icons.Default.ArrowBack,"Indietro")}}) }) { padding -> if(records.isEmpty()) Box(Modifier.fillMaxSize().padding(padding),contentAlignment=Alignment.Center){Text("Nessuna registrazione",color=Color.Gray)} else LazyColumn(Modifier.padding(padding).padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){itemsIndexed(records){_,record->Card(Modifier.fillMaxWidth(), colors=CardDefaults.cardColors(containerColor=when { record.mode == EntryMode.SENSORE -> Color(0xFFE5E7EB); record.insulinType == InsulinType.RAPIDA -> Color(0xFFE5F5E9); else -> Color(0xFFF0E6FA) })){Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically){Column(Modifier.weight(1f)){Text(record.area.label,fontWeight=FontWeight.Bold);Text("${displayZoneName(record.area,record.zone)} · ${record.mode.label}");record.insulinType?.let{Text(it.label,color=it.color,fontWeight=FontWeight.SemiBold)};Text(formatter.format(Date(record.eventDateTime)),fontSize=12.sp,color=Color.Gray)};IconButton(onClick={deleting=record}){Icon(Icons.Default.Delete,"Elimina registrazione",tint=MaterialTheme.colorScheme.error)}}}}} } }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable private fun SettingsScreen(avatar: AvatarStyle, settings: TimingSettings, onAvatar: (AvatarStyle)->Unit, onSettings: (TimingSettings)->Boolean, backupState: ()->AppBackupState, onImported: (AppBackupState)->Unit, onBack: () -> Unit) {
