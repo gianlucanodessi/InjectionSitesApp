@@ -76,7 +76,7 @@ struct AreaScreen: View {
                 }
                 Text("Quando è avvenuto l’evento").bold()
                 DatePicker("Data", selection: $date, displayedComponents: .date).datePickerStyle(.graphical)
-                Button { timePicker = true } label: { Label("Ora: \(date.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute()))", systemImage: "clock") }
+                Button { timePicker = true } label: { Label("Ora: \(EventTime.text(for: date))", systemImage: "clock") }
                 BodyDiagram(state: store.state, detail: area, selected: zone) { _, index in zone = index; saved = false }
                 TimelineView(.periodic(from: .now, by: 60)) { timeline in
                     VStack(spacing: 10) {
@@ -134,7 +134,7 @@ struct TimeWheel: View {
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("Annulla") { dismiss() } }
                     ToolbarItem(placement: .confirmationAction) { Button("Conferma") {
-                        if let result = Calendar.current.date(bySettingHour: hour, minute: minute, second: 0, of: date) { date = result }
+                        if let result = EventTime.replacingTime(in: date, hour: hour, minute: minute) { date = result }
                         dismiss()
                     } }
                 }

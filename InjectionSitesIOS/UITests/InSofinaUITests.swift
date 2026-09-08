@@ -44,7 +44,9 @@ final class InSofinaUITests: XCTestCase {
         app.pickerWheels.element(boundBy: 0).adjust(toPickerWheelValue: "23")
         app.pickerWheels.element(boundBy: 1).adjust(toPickerWheelValue: "59")
         app.buttons["Conferma"].tap()
-        XCTAssertTrue(time.label.contains("23:59"))
+        let updatedTime = app.buttons.matching(NSPredicate(format: "label == %@", "Ora: 23:59")).firstMatch
+        XCTAssertTrue(updatedTime.waitForExistence(timeout: 5))
+        XCTAssertEqual(updatedTime.label, "Ora: 23:59")
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Dettaglio anatomico e ora 24 ore"; attachment.lifetime = .keepAlways
         add(attachment)
