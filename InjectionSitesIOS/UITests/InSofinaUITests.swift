@@ -16,9 +16,33 @@ final class InSofinaUITests: XCTestCase {
         attachment.name = "Impostazioni salvate e safe area"; attachment.lifetime = .keepAlways
         add(attachment)
         XCUIDevice.shared.orientation = .landscapeLeft
-        XCTAssertTrue(save.isHittable)
-        save.tap()
-        XCTAssertEqual(save.label, "Salvato")
+        let landscapeSave = app.buttons["saveSettings"]
+        let readyAfterRotation = NSPredicate { _, _ in
+            let window = app.windows.firstMatch
+            guard landscapeSave.exists, window.exists else { return false }
+            let frame = landscapeSave.frame
+            let windowFrame = window.frame
+            guard !frame.isNull, !frame.isInfinite, !frame.isEmpty,
+                  !windowFrame.isNull, !windowFrame.isInfinite, !windowFrame.isEmpty,
+                  [frame.minX, frame.minY, frame.maxX, frame.maxY,
+                   windowFrame.minX, windowFrame.minY, windowFrame.maxX, windowFrame.maxY].allSatisfy({ $0.isFinite }),
+                  windowFrame.width > windowFrame.height,
+                  windowFrame.contains(frame), frame.maxY < windowFrame.maxY - 8 else { return false }
+            return landscapeSave.isHittable
+        }
+        let rotationExpectation = XCTNSPredicateExpectation(predicate: readyAfterRotation, object: landscapeSave)
+        let rotationResult = XCTWaiter.wait(for: [rotationExpectation], timeout: 10)
+        XCTAssertEqual(rotationResult, .completed, "Il pulsante deve essere visibile e toccabile nella safe area dopo la rotazione")
+        guard rotationResult == .completed else { return }
+        let landscapeFrame = landscapeSave.frame
+        let visibleWindow = app.windows.firstMatch.frame
+        XCTAssertFalse(landscapeFrame.isNull)
+        XCTAssertFalse(landscapeFrame.isInfinite)
+        XCTAssertFalse(landscapeFrame.isEmpty)
+        XCTAssertTrue(visibleWindow.contains(landscapeFrame))
+        XCTAssertLessThan(landscapeFrame.maxY, visibleWindow.maxY - 8)
+        landscapeSave.tap()
+        XCTAssertEqual(landscapeSave.label, "Salvato")
         XCUIDevice.shared.orientation = .portrait
         app.terminate(); app.launch()
         app.buttons["Storico"].tap()
