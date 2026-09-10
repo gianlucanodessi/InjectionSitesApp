@@ -1,0 +1,50 @@
+{
+  "avatar_man_back": {
+    "source": "InjectionSitesAndroid_v2/app/src/main/res/drawable-nodpi/avatar_man_back.png",
+    "sha256": "e77c9b9371d1a3b429fa2d801f77d1ade2cf5e80183710e855420eb769b09398",
+    "size": [
+      1024,
+      1536
+    ]
+  },
+  "avatar_man_front": {
+    "source": "InjectionSitesAndroid_v2/app/src/main/res/drawable-nodpi/avatar_man_front.png",
+    "sha256": "ef25d62dbfa51db8c6d056c6d9d07a81130dcae66b33c6bcbd7d30ff6eb22204",
+    "size": [
+      901,
+      1746
+    ]
+  },
+  "avatar_woman_back": {
+    "source": "InjectionSitesAndroid_v2/app/src/main/res/drawable-nodpi/avatar_woman_back.png",
+    "sha256": "4d2fb661bd881482ff88872cc5a28c0f493d5375454834236227d225f07ae63c",
+    "size": [
+      1024,
+      1536
+    ]
+  },
+  "avatar_woman_front": {
+    "source": "InjectionSitesAndroid_v2/app/src/main/res/drawable-nodpi/avatar_woman_front.png",
+    "sha256": "072ad14112f95cb0d7f05cd10d5a154547ac9086f2a6533315c030cf63cc7375",
+    "size": [
+      1024,
+      1536
+    ]
+  },
+  "avatar_yeti_back": {
+    "source": "InjectionSitesAndroid_v2/app/src/main/res/drawable-nodpi/avatar_yeti_back.png",
+    "sha256": "aa80dd0b47117bce9876f4798a39ed2f3b51af0fa8f51706da48979c9c3367e9",
+    "size": [
+      1024,
+      1536
+    ]
+  },
+  "avatar_yeti_front": {
+    "source": "InjectionSitesAndroid_v2/app/src/main/res/drawable-nodpi/avatar_yeti_front.png",
+    "sha256": "ca84e73d5b6fe8a92a26c7d8f0ca4e75937bf1c8cf559fbe6e4b1e27cbd7641b",
+    "size": [
+      1024,
+      1536
+    ]
+  }
+}

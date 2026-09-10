@@ -1,0 +1,6 @@
+*.xcodeproj/
+DerivedData/
+build/
+Config/Info.plist
+.DS_Store
+__pycache__/
