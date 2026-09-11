@@ -13,8 +13,20 @@ import XCTest
         let document = try XCTUnwrap(model.document)
         XCTAssertEqual(try BackupCodec.read(document.data, password: secret).state, AppState())
         XCTAssertTrue(model.password.isEmpty); XCTAssertTrue(model.confirmation.isEmpty)
+        XCTAssertTrue(model.requestExport())
+        XCTAssertEqual(model.exportRequestCount, 1)
         model.report("Esportazione annullata", error: true)
         XCTAssertEqual(model.document?.data, document.data, "Il selettore può essere riaperto senza perdere il file")
+        XCTAssertTrue(model.requestExport())
+        XCTAssertEqual(model.exportRequestCount, 2)
+        XCTAssertEqual(model.document?.data, document.data)
+        XCTAssertFalse(model.busy)
+    }
+
+    func testExportCannotBeRequestedWithoutPreparedDocument() {
+        let model = BackupFlowModel(operation: .export)
+        XCTAssertFalse(model.requestExport())
+        XCTAssertEqual(model.exportRequestCount, 0)
     }
 
     func testExportFailureStopsSpinnerAndAllowsRetry() async throws {
@@ -60,9 +72,14 @@ import XCTest
         XCTAssertFalse(model.busy); XCTAssertTrue(model.messageIsError); XCTAssertNil(model.filename)
     }
 
-    func testApplicationSupportsOnlyPortrait() {
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "UISupportedInterfaceOrientations") as? [String], ["UIInterfaceOrientationPortrait"])
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "UISupportedInterfaceOrientations~ipad") as? [String], ["UIInterfaceOrientationPortrait"])
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "UIRequiresFullScreen") as? Bool, true)
+    func testApplicationSupportsOnlyPortrait() throws {
+        let host = try HostAppBundle.locate(from: Bundle(for: BackupFlowTests.self))
+        // Read the physical plist: Bundle's convenience lookup may apply platform
+        // suffix resolution, hiding the literal ~ipad key we must verify.
+        let data = try Data(contentsOf: host.bundleURL.appendingPathComponent("Info.plist"))
+        let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any], "Info.plist dell’app host non valido")
+        XCTAssertEqual(try XCTUnwrap(plist["UISupportedInterfaceOrientations"] as? [String]), ["UIInterfaceOrientationPortrait"])
+        XCTAssertEqual(try XCTUnwrap(plist["UISupportedInterfaceOrientations~ipad"] as? [String]), ["UIInterfaceOrientationPortrait"])
+        XCTAssertEqual(try XCTUnwrap(plist["UIRequiresFullScreen"] as? Bool), true)
     }
 }

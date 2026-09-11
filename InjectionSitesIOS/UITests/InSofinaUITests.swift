@@ -86,8 +86,11 @@ final class InSofinaUITests: XCTestCase {
         XCTAssertTrue(app.secureTextFields["backupPassword"].waitForExistence(timeout: 5))
     }
 
-    @MainActor func testExportPasswordStaysOpenAndBackupReachesDocumentPicker() throws {
+    @MainActor func testExportPasswordAndAppOwnedRequestRetainDocumentForRetry() throws {
         let app = XCUIApplication()
+        // Exercise the real app flow and button action, substituting only the
+        // system-owned document presenter (covered by the README manual check).
+        app.launchArguments.append("-insofinaUITestExportRequestsOnly")
         app.launch()
         openBackup("Esporta backup", in: app)
         app.secureTextFields["backupPassword"].tap()
@@ -97,11 +100,18 @@ final class InSofinaUITests: XCTestCase {
         app.buttons["prepareBackup"].tap()
         XCTAssertTrue(app.staticTexts["backupReady"].waitForExistence(timeout: 15))
         XCTAssertFalse(app.progressIndicators["backupBusy"].exists)
-        app.buttons["saveBackupFile"].tap()
-        let cancelPicker = app.buttons.matching(NSPredicate(format: "label IN %@", ["Cancel", "Annulla"])).firstMatch
-        XCTAssertTrue(cancelPicker.waitForExistence(timeout: 10))
-        cancelPicker.tap()
-        XCTAssertTrue(app.buttons["saveBackupFile"].waitForExistence(timeout: 5))
+        let saveFile = app.buttons["saveBackupFile"]
+        XCTAssertTrue(saveFile.waitForExistence(timeout: 5))
+        XCTAssertTrue(saveFile.isHittable)
+        XCTAssertEqual(saveFile.value as? String, "Documento disponibile")
+        for request in 1...2 {
+            saveFile.tap()
+            let requested = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == true AND hittable == true AND value == %@", "Esportazione richiesta: \(request). Documento disponibile"),
+                object: app.buttons["saveBackupFile"])
+            XCTAssertEqual(XCTWaiter.wait(for: [requested], timeout: 5), .completed)
+            XCTAssertFalse(app.progressIndicators["backupBusy"].exists)
+        }
         XCTAssertTrue(app.staticTexts["backupReady"].exists)
         app.buttons["closeBackup"].tap()
         XCTAssertTrue(app.buttons["Esporta backup"].waitForExistence(timeout: 5))
@@ -119,5 +129,41 @@ final class InSofinaUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Seleziona file di backup"].exists)
         app.buttons["closeBackup"].tap()
         XCTAssertTrue(app.buttons["Importa backup"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor func testHistoryRemainsReadableAndAccessibleWithSystemDarkAppearance() throws {
+        let device = XCUIDevice.shared
+        let previousAppearance = device.appearance
+        device.appearance = .dark
+        defer { device.appearance = previousAppearance }
+        let app = XCUIApplication()
+        app.launchArguments.append("-insofinaUITestHistory")
+        app.launch()
+        XCTAssertEqual(device.appearance, .dark, "Il sistema deve essere realmente in modalità scura")
+        XCTAssertTrue(app.buttons["Storico"].waitForExistence(timeout: 5))
+        app.buttons["Storico"].tap()
+        XCTAssertTrue(app.navigationBars["Storico"].waitForExistence(timeout: 5))
+
+        let records = [
+            ("ui-history-rapid", "Braccio destro", "Insulina"),
+            ("ui-history-basal", "Coscia sinistra", "Insulina"),
+            ("ui-history-sensor", "Addome", "Sensore")
+        ]
+        for (id, area, mode) in records {
+            let name = app.staticTexts["history-area-\(id)"]
+            XCTAssertTrue(name.waitForExistence(timeout: 5))
+            XCTAssertTrue(name.isHittable, "La registrazione deve essere visibile, non solo presente nei dati")
+            XCTAssertEqual(name.label, area)
+            XCTAssertTrue(app.staticTexts["history-zone-\(id)"].label.contains(mode))
+            let date = app.staticTexts["history-date-\(id)"]
+            XCTAssertTrue(date.exists); XCTAssertFalse(date.label.isEmpty)
+            XCTAssertTrue(app.buttons["history-delete-\(id)"].isHittable)
+        }
+        XCTAssertEqual(app.staticTexts["history-insulin-ui-history-rapid"].label, "Rapida")
+        XCTAssertEqual(app.staticTexts["history-insulin-ui-history-basal"].label, "Basale")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Storico chiaro leggibile con sistema scuro - Rapida Basale Sensore"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
     }
 }

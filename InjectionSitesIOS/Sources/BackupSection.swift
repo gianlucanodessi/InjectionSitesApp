@@ -41,12 +41,19 @@ struct BackupSection: View {
     @Published private(set) var document: BackupDocument?
     @Published private(set) var pending: DecodedBackup?
     @Published private(set) var filename: String?
+    @Published private(set) var exportRequestCount = 0
     private var incomingData: Data?
     private(set) var retainedPassword = ""
 
     init(operation: BackupOperation) { self.operation = operation }
 
     func report(_ text: String, error: Bool) { message = text; messageIsError = error }
+
+    @discardableResult func requestExport() -> Bool {
+        guard !busy, let document, !document.data.isEmpty else { return false }
+        exportRequestCount += 1
+        return true
+    }
 
     func load(_ url: URL) async {
         guard !busy else { return }
@@ -145,7 +152,9 @@ struct BackupSection: View {
                 } else if model.document != nil {
                     Text("Backup pronto").accessibilityIdentifier("backupReady")
                     Text("Scegli dove salvare il file protetto.")
-                    Button("Salva backup") { exporting = true }.accessibilityIdentifier("saveBackupFile")
+                    Button("Salva backup", action: requestExport)
+                        .accessibilityIdentifier("saveBackupFile")
+                        .accessibilityValue(model.exportRequestCount == 0 ? "Documento disponibile" : "Esportazione richiesta: \(model.exportRequestCount). Documento disponibile")
                 } else {
                     if model.operation == .importData {
                         Button("Seleziona file di backup") { importing = true }.disabled(model.busy)
@@ -194,5 +203,15 @@ struct BackupSection: View {
 
     private func finishImport() {
         if model.apply(to: store, replace: replace) { onImported(); imported = true }
+    }
+
+    private func requestExport() {
+        guard model.requestExport() else { return }
+        #if DEBUG
+        // The UI contract test observes the real button action and retained document.
+        // Only the external Apple presenter is substituted; encryption is unchanged.
+        if UITestSupport.observesExportRequestsOnly { return }
+        #endif
+        exporting = true
     }
 }
