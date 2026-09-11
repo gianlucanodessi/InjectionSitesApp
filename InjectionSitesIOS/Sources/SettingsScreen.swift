@@ -10,6 +10,7 @@ struct SettingsScreen: View {
     @State private var hidden: String
     @State private var saved = false
     @State private var error: String?
+    @State private var backupOperation: BackupOperation?
     init(state: AppState) {
         _avatar = State(initialValue: state.avatar)
         _red = State(initialValue: String(state.settings.redHours)); _orange = State(initialValue: String(state.settings.orangeHours)); _yellow = State(initialValue: String(state.settings.yellowHours))
@@ -31,9 +32,12 @@ struct SettingsScreen: View {
             }
             if let error { Section { Text(error).foregroundStyle(.red) } }
             Section { Button("Ripristina valori predefiniti") { reload(TimingSettings()); save() } }
-            BackupSection(onImported: { saved = false })
+            BackupSection { backupOperation = $0 }
         }
         .navigationTitle("Impostazioni")
+        .sheet(item: $backupOperation) { operation in
+            BackupFlow(operation: operation, onImported: { saved = false })
+        }
         .safeAreaInset(edge: .bottom) {
             VStack {
                 if saved { Text("Impostazioni salvate").foregroundStyle(.green) }

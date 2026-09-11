@@ -12,123 +12,206 @@ struct BackupDocument: FileDocument {
     }
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
 }
+
+enum BackupOperation: String, Identifiable {
+    case export, importData
+    var id: String { rawValue }
+}
+
+// Only buttons live in the Form's Section. The SettingsScreen root owns the sheet.
 struct BackupSection: View {
     @EnvironmentObject var store: StateStore
-    var onImported: () -> Void = {}
-    @State private var importing = false
-    @State private var exporting = false
-    @State private var passwordSheet = false
-    @State private var exportMode = true
-    @State private var password = ""
-    @State private var confirmation = ""
-    @State private var message: String?
-    @State private var messageIsError = false
-    @State private var busy = false
-    @State private var incomingData: Data?
-    @State private var document = BackupDocument(data: Data())
-    @State private var pending: DecodedBackup?
-    @State private var preview = false
-    @State private var replace = false
-    @State private var confirmReplace = false
+    let open: (BackupOperation) -> Void
     var body: some View {
         Section("Backup dei dati") {
             Text("Trasferisci storico, sensori e impostazioni tra dispositivi Android e iOS con un file protetto e la sua password. L’app non invia dati a server. Per conservarli soltanto in locale, scegli «Sul mio iPhone» nel selettore documenti.").font(.caption)
-            Button("Esporta backup") { exportMode = true; password = ""; confirmation = ""; message = nil; passwordSheet = true }.disabled(busy || store.loadFailed)
-            Button("Importa backup") { importing = true }.disabled(busy || store.loadFailed)
-            if busy { ProgressView("Operazione in corso…") }
-            if let message { Text(message).foregroundStyle(messageIsError ? .red : .green) }
+            Button("Esporta backup") { open(.export) }.disabled(store.loadFailed)
+            Button("Importa backup") { open(.importData) }.disabled(store.loadFailed)
         }
-        .fileExporter(isPresented: $exporting, document: document, contentType: .insofinaBackup, defaultFilename: "InSofina-backup.insofia-backup") { result in
-            switch result { case .success: report("Backup esportato", error: false); case .failure(let error): report(error.localizedDescription, error: true) }
-            document = BackupDocument(data: Data())
-        }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.insofinaBackup, .data, .json]) { result in
-            do {
-                let url = try result.get()
+    }
+}
+
+@MainActor final class BackupFlowModel: ObservableObject {
+    let operation: BackupOperation
+    @Published var password = ""
+    @Published var confirmation = ""
+    @Published private(set) var busy = false
+    @Published private(set) var message: String?
+    @Published private(set) var messageIsError = false
+    @Published private(set) var document: BackupDocument?
+    @Published private(set) var pending: DecodedBackup?
+    @Published private(set) var filename: String?
+    @Published private(set) var exportRequestCount = 0
+    private var incomingData: Data?
+    private(set) var retainedPassword = ""
+
+    init(operation: BackupOperation) { self.operation = operation }
+
+    func report(_ text: String, error: Bool) { message = text; messageIsError = error }
+
+    @discardableResult func requestExport() -> Bool {
+        guard !busy, let document, !document.data.isEmpty else { return false }
+        exportRequestCount += 1
+        return true
+    }
+
+    func load(_ url: URL) async {
+        guard !busy else { return }
+        busy = true; message = nil; messageIsError = false; incomingData = nil; filename = nil
+        defer { busy = false }
+        do {
+            incomingData = try await Task.detached(priority: .userInitiated) {
                 let scope = url.startAccessingSecurityScopedResource()
                 defer { if scope { url.stopAccessingSecurityScopedResource() } }
-                incomingData = try BackupCodec.readFile(url)
-                exportMode = false; password = ""; confirmation = ""; message = nil; passwordSheet = true
-            } catch { report(error.localizedDescription, error: true) }
-        }
-        .sheet(isPresented: $passwordSheet, onDismiss: { password = ""; confirmation = "" }) {
-            NavigationStack {
-                Form {
-                    Text(exportMode ? "Scegli una password di almeno 8 caratteri." : "Inserisci la password usata per proteggere il file.")
-                    SecureField("Password", text: $password).textContentType(exportMode ? .newPassword : .password).autocorrectionDisabled()
-                    if exportMode { SecureField("Conferma password", text: $confirmation).textContentType(.newPassword) }
-                    if let message, messageIsError { Text(message).foregroundStyle(.red) }
-                    Button("Continua", action: prepare).disabled(busy)
-                    if busy { ProgressView() }
-                }.navigationTitle(exportMode ? "Proteggi il backup" : "Apri il backup")
-                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Annulla") { incomingData = nil; passwordSheet = false }.disabled(busy) } }
-            }.interactiveDismissDisabled(busy)
-        }
-        .sheet(isPresented: $preview, onDismiss: { pending = nil; retainedPassword = ""; replace = false }) {
-            NavigationStack {
-                Form {
-                    if let pending {
-                        Section("Anteprima backup") {
-                            Text("Data: \(Date(milliseconds: pending.exportedAt).formatted(date: .numeric, time: .shortened))")
-                            Text("Versione app: \(pending.appVersion) · schema \(pending.schemaVersion)")
-                            Text("Storico: \(pending.state.records.count) elementi")
-                            Text("Sensori: \(pending.state.records.filter { $0.mode == .SENSORE }.count)")
-                            Text("Avatar: \(pending.state.avatar.label)")
-                            Text("Le impostazioni e l’avatar saranno quelli del backup, anche in modalità unione.")
-                        }
-                        Picker("Modalità importazione", selection: $replace) {
-                            Text("Unisci con i dati esistenti").tag(false)
-                            Text("Sostituisci tutti i dati").tag(true)
-                        }.pickerStyle(.inline)
-                        Button("Importa") { if replace { confirmReplace = true } else { finishImport() } }.disabled(busy)
-                        if busy { ProgressView("Importazione…") }
-                        if let message, messageIsError { Text(message).foregroundStyle(.red) }
-                    }
-                }.navigationTitle("Anteprima backup")
-                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Annulla") { preview = false }.disabled(busy) } }
-                    .alert("Sostituire tutti i dati?", isPresented: $confirmReplace) {
-                        Button("Sostituisci", role: .destructive, action: finishImport)
-                        Button("Annulla", role: .cancel) {}
-                    } message: { Text("Storico e impostazioni saranno sostituiti. Prima verrà creato un backup di sicurezza cifrato nella memoria privata dell’app.") }
-            }.interactiveDismissDisabled(busy)
-        }
+                return try BackupCodec.readFile(url)
+            }.value
+            filename = url.lastPathComponent
+        } catch { report(error.localizedDescription, error: true) }
     }
-    @State private var retainedPassword = ""
-    private func report(_ text: String, error: Bool) { message = text; messageIsError = error }
-    private func prepare() {
-        if exportMode && (password.utf16.count < 8 || password != confirmation) { report("Usa almeno 8 caratteri e due password identiche.", error: true); return }
+
+    func prepare(state: AppState) async {
+        guard !busy else { return }
+        message = nil; messageIsError = false
+        if operation == .export && (password.utf16.count < 8 || password != confirmation) {
+            report("Usa almeno 8 caratteri e due password identiche.", error: true); return
+        }
         guard !password.isEmpty else { report("Inserisci la password del backup.", error: true); return }
-        busy = true; message = nil
-        let secret = password, state = store.state, data = incomingData, isExport = exportMode
-        Task {
-            do {
-                if isExport {
-                    let output = try await Task.detached(priority: .userInitiated) { try BackupCodec.write(state, password: secret) }.value
-                    document = BackupDocument(data: output); passwordSheet = false
-                    busy = false
-                    // Let the password sheet dismiss before presenting the native picker.
-                    try? await Task.sleep(for: .milliseconds(350))
-                    exporting = true
-                } else {
-                    guard let data else { throw AppError.invalidData }
-                    let decoded = try await Task.detached(priority: .userInitiated) { try BackupCodec.read(data, password: secret) }.value
-                    pending = decoded; retainedPassword = secret; incomingData = nil; replace = false; passwordSheet = false; busy = false
-                    try? await Task.sleep(for: .milliseconds(350))
-                    preview = true
-                }
-                password = ""; confirmation = ""
-            } catch { busy = false; report(error.localizedDescription, error: true) }
+        if operation == .importData && incomingData == nil {
+            report("Seleziona il file di backup da importare.", error: true); return
         }
+        busy = true
+        defer { busy = false }
+        let secret = password
+        do {
+            if operation == .export {
+                let bytes = try await Task.detached(priority: .userInitiated) {
+                    try BackupCodec.write(state, password: secret)
+                }.value
+                // Keep the document alive through picker cancellation/retry.
+                // There is no dismissal or timed presentation handoff.
+                document = BackupDocument(data: bytes)
+            } else if let data = incomingData {
+                pending = try await Task.detached(priority: .userInitiated) {
+                    try BackupCodec.read(data, password: secret)
+                }.value
+                retainedPassword = secret
+                incomingData = nil
+            }
+            password = ""; confirmation = ""
+        } catch { report(error.localizedDescription, error: true) }
     }
-    private func finishImport() {
-        guard let pending else { return }
-        busy = true; message = nil
+
+    func apply(to store: StateStore, replace: Bool) -> Bool {
+        guard !busy, let pending else { return false }
+        busy = true
+        defer { busy = false }
         do {
             let count = try store.apply(pending.state, replace: replace, password: retainedPassword)
-            onImported()
             report("Backup importato: \(count) elementi importati", error: false)
-            preview = false
-        } catch { report(error.localizedDescription, error: true) }
-        busy = false
+            self.pending = nil; retainedPassword = ""
+            return true
+        } catch { report(error.localizedDescription, error: true); return false }
+    }
+}
+
+@MainActor struct BackupFlow: View {
+    @EnvironmentObject var store: StateStore
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var model: BackupFlowModel
+    var onImported: () -> Void
+    @State private var importing = false
+    @State private var exporting = false
+    @State private var replace = false
+    @State private var confirmReplace = false
+    @State private var imported = false
+
+    init(operation: BackupOperation, onImported: @escaping () -> Void) {
+        _model = StateObject(wrappedValue: BackupFlowModel(operation: operation))
+        self.onImported = onImported
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if imported {
+                    Button("Fine") { dismiss() }
+                } else if let pending = model.pending {
+                    Section("Anteprima backup") {
+                        Text("Data: \(Date(milliseconds: pending.exportedAt).formatted(date: .numeric, time: .shortened))")
+                        Text("Versione app: \(pending.appVersion) · schema \(pending.schemaVersion)")
+                        Text("Storico: \(pending.state.records.count) elementi")
+                        Text("Sensori: \(pending.state.records.filter { $0.mode == .SENSORE }.count)")
+                        Text("Avatar: \(pending.state.avatar.label)")
+                        Text("Le impostazioni e l’avatar saranno quelli del backup, anche in modalità unione.")
+                    }
+                    Picker("Modalità importazione", selection: $replace) {
+                        Text("Unisci con i dati esistenti").tag(false)
+                        Text("Sostituisci tutti i dati").tag(true)
+                    }.pickerStyle(.inline)
+                    Button("Importa") { if replace { confirmReplace = true } else { finishImport() } }.disabled(model.busy)
+                } else if model.document != nil {
+                    Text("Backup pronto").accessibilityIdentifier("backupReady")
+                    Text("Scegli dove salvare il file protetto.")
+                    Button("Salva backup", action: requestExport)
+                        .accessibilityIdentifier("saveBackupFile")
+                        .accessibilityValue(model.exportRequestCount == 0 ? "Documento disponibile" : "Esportazione richiesta: \(model.exportRequestCount). Documento disponibile")
+                } else {
+                    if model.operation == .importData {
+                        Button("Seleziona file di backup") { importing = true }.disabled(model.busy)
+                        if let filename = model.filename { Text(filename) }
+                    }
+                    Text(model.operation == .export ? "Scegli una password di almeno 8 caratteri." : "Seleziona il file e inserisci la password usata per proteggerlo.")
+                    SecureField("Password", text: $model.password)
+                        .textContentType(model.operation == .export ? .newPassword : .password)
+                        .autocorrectionDisabled().accessibilityIdentifier("backupPassword")
+                    if model.operation == .export {
+                        SecureField("Conferma password", text: $model.confirmation)
+                            .textContentType(.newPassword).accessibilityIdentifier("backupPasswordConfirmation")
+                    }
+                    Button("Continua") { Task { await model.prepare(state: store.state) } }
+                        .disabled(model.busy).accessibilityIdentifier("prepareBackup")
+                }
+                if model.busy { ProgressView("Operazione in corso…").accessibilityIdentifier("backupBusy") }
+                if let message = model.message { Text(message).foregroundStyle(model.messageIsError ? .red : .green) }
+            }
+            .navigationTitle(model.pending != nil ? "Anteprima backup" : model.operation == .export ? "Proteggi il backup" : "Apri il backup")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(model.document != nil || imported ? "Fine" : "Annulla") { dismiss() }
+                        .disabled(model.busy || importing || exporting).accessibilityIdentifier("closeBackup")
+                }
+            }
+            .alert("Sostituire tutti i dati?", isPresented: $confirmReplace) {
+                Button("Sostituisci", role: .destructive, action: finishImport)
+                Button("Annulla", role: .cancel) {}
+            } message: { Text("Storico e impostazioni saranno sostituiti. Prima verrà creato un backup di sicurezza cifrato nella memoria privata dell’app.") }
+        }
+        .interactiveDismissDisabled(model.busy || importing || exporting)
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.insofinaBackup, .data, .json]) { result in
+            switch result {
+            case .success(let url): Task { await model.load(url) }
+            case .failure(let error): model.report(error.localizedDescription, error: true)
+            }
+        }
+        .fileExporter(isPresented: $exporting, document: model.document, contentType: .insofinaBackup, defaultFilename: "InSofina-backup.insofia-backup") { result in
+            switch result {
+            case .success: model.report("Backup esportato", error: false)
+            case .failure(let error): model.report(error.localizedDescription, error: true)
+            }
+        }
+    }
+
+    private func finishImport() {
+        if model.apply(to: store, replace: replace) { onImported(); imported = true }
+    }
+
+    private func requestExport() {
+        guard model.requestExport() else { return }
+        #if DEBUG
+        // The UI contract test observes the real button action and retained document.
+        // Only the external Apple presenter is substituted; encryption is unchanged.
+        if UITestSupport.observesExportRequestsOnly { return }
+        #endif
+        exporting = true
     }
 }

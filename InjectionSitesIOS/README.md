@@ -1,7 +1,7 @@
 # InSofina per iOS
 
 Implementazione Swift/SwiftUI per iOS 17+, preparata sulla branch
-`ios-implementation`. Il progetto Android e il relativo workflow non sono stati
+`ios-portrait-backup-fixes`. Il progetto Android e il relativo workflow non sono stati
 modificati. Non sono stati creati commit, push, PR, merge o distribuzioni.
 
 Il bundle identifier provvisorio è **`com.example.insofina.ios`**, configurabile
@@ -11,6 +11,7 @@ contenitore locale. Non è stato registrato alcun identificativo Apple.
 
 ## Comportamento implementato
 
+- Orientamento solo verticale e aspetto chiaro anche con sistema in modalità scura.
 - Dashboard fronte/retro, scelta Uomo/Donna/Yeti e 21 dettagli anatomici.
 - Sei PNG originali, identici byte per byte; proporzioni preservate. I dettagli
   ingrandiscono le zone della dashboard senza creare nuovi PNG.
@@ -27,6 +28,73 @@ contenitore locale. Non è stato registrato alcun identificativo Apple.
 - Backup `.insofia-backup`, password in campo protetto, selettore documenti,
   anteprima, unione predefinita, deduplicazione, sostituzione confermata e backup
   locale cifrato di sicurezza prima della sostituzione.
+
+## Controlli di orientamento, export e leggibilità
+
+Il test di orientamento cerca il bundle host con identificatore
+`com.example.insofina.ios` risalendo dal bundle XCTest o fra i bundle caricati.
+Legge il file `InSofina.app/Info.plist` direttamente, senza affidarsi a
+`Bundle.main` o alla risoluzione automatica dei suffissi di `object(forInfoDictionaryKey:)`.
+Controlla separatamente i due array Portrait (generale e `~ipad`) e
+`UIRequiresFullScreen == true`; un bundle o una chiave mancanti fanno fallire
+il test. Rimane anche il test UI che ruota fisicamente il simulatore e controlla
+che finestra, pulsante di salvataggio e safe area restino verticali e accessibili.
+
+`testExportPasswordAndAppOwnedRequestRetainDocumentForRetry` verifica il flusso
+controllato da InSofina: compilazione di password e conferma, cifratura reale,
+fine della rotella, «Backup pronto», pulsante «Salva backup» toccabile, richiesta
+registrata e documento ancora disponibile per una seconda richiesta. Le attese
+usano predicate expectation e `waitForExistence`, senza pause fisse.
+
+In questo solo test, l’argomento Debug `-insofinaUITestExportRequestsOnly`
+sostituisce la **presentazione Apple** dopo l’esecuzione dell’azione reale del
+pulsante. Non sostituisce la preparazione, la crittografia o il documento.
+Il numero delle richieste viene esposto nel valore di accessibilità del pulsante;
+non vengono aggiunti messaggi tecnici visibili. Il test non dichiara di automatizzare
+il selettore di sistema e non cerca pulsanti localizzati o bundle privati di File.
+Le build Release non includono questa sostituzione. Senza l’argomento di test,
+«Salva backup» presenta normalmente il selettore nativo tramite `fileExporter`.
+
+I test unitari mantengono i controlli su backup decifrabile, errore seguito da
+nuovo tentativo, fine della rotella, password errata seguita da password corretta,
+anteprima senza importazione automatica e documento conservato dopo annullamento.
+
+La radice SwiftUI impone `.preferredColorScheme(.light)`. Lo Storico assegna
+colori espliciti a ogni testo e al pulsante Elimina; i tre sfondi originali
+restano invariati. Tutte le 15 combinazioni testo/sfondo hanno contrasto almeno
+4,5:1, con minimo misurato **5,23:1**. Il controllo eseguibile anche su Windows è:
+
+```bash
+python3 InjectionSitesIOS/scripts/verify_history_contrast.py
+```
+
+`testHistoryRemainsReadableAndAccessibleWithSystemDarkAppearance` imposta la
+modalità scura reale tramite la
+[proprietà pubblica XCTest `XCUIDevice.appearance`](https://developer.apple.com/documentation/xcuiautomation/xcuidevice/appearance-swift.property),
+apre lo Storico e verifica tre registrazioni accessibili (Rapida, Basale, Sensore).
+L’argomento Debug `-insofinaUITestHistory` prepara esclusivamente una fixture
+in memoria con directory temporanea separata: non legge né modifica lo storico
+persistente dell’app. Il test conserva lo screenshot «Storico chiaro leggibile
+con sistema scuro - Rapida Basale Sensore» con `keepAlways` dentro lo `.xcresult`,
+già raccolto dal workflow fra gli artefatti. Ripristina l’aspetto di sistema
+precedente alla fine del test.
+
+## Verifica manuale del selettore Apple
+
+Su simulatore o iPhone, con avvio normale dell’app (senza argomenti di test):
+
+1. Aprire Impostazioni → Esporta backup, compilare password e conferma e premere
+   «Continua»; verificare che la schermata resti aperta e arrivi a «Backup pronto».
+2. Aprire «Salva backup» e scegliere una destinazione, per esempio «Sul mio iPhone».
+3. Annullare il selettore prima del salvataggio.
+4. Verificare che il backup sia ancora pronto e riaprire «Salva backup».
+5. Scegliere la destinazione e salvare realmente il file `.insofia-backup`;
+   controllarne la presenza e la conferma «Backup esportato» nell’app.
+6. Riaprire il file tramite Importa backup: provare una password errata, poi
+   quella corretta, e verificare l’anteprima prima di applicare qualsiasi modifica.
+
+Questa prova copre il selettore di sistema, il provider documenti e la scrittura
+effettiva, che non sono coperti dal test UI delle sole richieste InSofina.
 
 La decisione sulle immagini di dettaglio e l’incongruenza preesistente nella
 numerazione Android sono spiegate in `PORTING.md`. Non vengono riscritti gli

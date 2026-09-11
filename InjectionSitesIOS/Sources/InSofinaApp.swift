@@ -1,10 +1,16 @@
 import SwiftUI
 
 @main @MainActor struct InSofinaApp: App {
-    @StateObject private var store = StateStore.live()
+    @StateObject private var store: StateStore = {
+        #if DEBUG
+        if let fixture = UITestSupport.historyStore() { return fixture }
+        #endif
+        return StateStore.live()
+    }()
     var body: some Scene {
         WindowGroup {
             HomeScreen().environmentObject(store).environment(\.locale, Locale(identifier: "it_IT"))
+                .preferredColorScheme(.light)
                 .tint(Color(hex: 0x1557C0))
                 .alert("Attenzione", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
                     Button("OK") { store.error = nil }
@@ -146,18 +152,30 @@ struct HistoryScreen: View {
     @State private var deleting: RecordItem?
     var body: some View {
         List {
-            if store.state.records.isEmpty { Text("Nessuna registrazione").foregroundStyle(.secondary) }
+            if store.state.records.isEmpty { Text("Nessuna registrazione").foregroundStyle(Color(hex: HistoryPalette.secondaryText)) }
             ForEach(ordered(store.state.records)) { record in
                 HStack {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(record.area.label).bold()
+                            .foregroundStyle(Color(hex: HistoryPalette.primaryText))
+                            .accessibilityIdentifier("history-area-\(record.id)")
                         Text("\(record.area.zoneName(record.zone)) · \(record.mode.label)")
-                        if let insulin = record.insulinType { Text(insulin.label).foregroundStyle(insulin == .RAPIDA ? .orange : .blue) }
+                            .foregroundStyle(Color(hex: HistoryPalette.secondaryText))
+                            .accessibilityIdentifier("history-zone-\(record.id)")
+                        if let insulin = record.insulinType {
+                            Text(insulin.label)
+                                .foregroundStyle(Color(hex: insulin == .RAPIDA ? HistoryPalette.rapidText : HistoryPalette.basalText))
+                                .accessibilityIdentifier("history-insulin-\(record.id)")
+                        }
                         Text(Date(milliseconds: record.eventDateTime).formatted(date: .numeric, time: .shortened)).font(.caption)
-                    }
+                            .foregroundStyle(Color(hex: HistoryPalette.secondaryText))
+                            .accessibilityIdentifier("history-date-\(record.id)")
+                    }.accessibilityElement(children: .contain)
                     Spacer()
-                    Button(role: .destructive) { deleting = record } label: { Image(systemName: "trash").accessibilityLabel("Elimina registrazione") }.buttonStyle(.borderless)
-                }.listRowBackground(Color(hex: record.mode == .SENSORE ? 0xE5E7EB : record.insulinType == .RAPIDA ? 0xE5F5E9 : 0xF0E6FA))
+                    Button(role: .destructive) { deleting = record } label: {
+                        Image(systemName: "trash").foregroundStyle(Color(hex: HistoryPalette.deleteText)).accessibilityLabel("Elimina registrazione")
+                    }.buttonStyle(.borderless).accessibilityIdentifier("history-delete-\(record.id)")
+                }.listRowBackground(HistoryPalette.background(for: record))
             }
         }.navigationTitle("Storico")
             .alert("Eliminare registrazione?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
