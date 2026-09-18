@@ -1,8 +1,7 @@
 # InSofina per iOS
 
-Implementazione Swift/SwiftUI per iOS 17+, preparata sulla branch
-`ios-portrait-backup-fixes`. Il progetto Android e il relativo workflow non sono stati
-modificati. Non sono stati creati commit, push, PR, merge o distribuzioni.
+Implementazione Swift/SwiftUI per iOS 17+. Il progetto Android e il relativo workflow
+non sono modificati dalle correzioni dell'interfaccia iOS.
 
 Il bundle identifier provvisorio è **`com.example.insofina.ios`**, configurabile
 in `project.yml` (`PRODUCT_BUNDLE_IDENTIFIER`). Prima di una distribuzione reale
@@ -131,6 +130,21 @@ bash InjectionSitesAndroid_v2/gradlew -p "$PWD/InjectionSitesIOS/Interop" run \
 xcodegen generate --spec InjectionSitesIOS/project.yml
 xcrun simctl list devices available
 ```
+
+`InSofina.xcodeproj` e `Config/Info.plist` sono prodotti generati. Dopo ogni pull,
+il progetto deve essere rigenerato con XcodeGen prima di aprirlo o archiviarlo;
+riutilizzare un progetto generato in precedenza può lasciare nella build vecchie
+impostazioni di orientamento. Per una build destinata a un dispositivo reale:
+
+1. selezionare `main` ed eseguire il pull;
+2. eseguire `xcodegen generate --spec InjectionSitesIOS/project.yml`;
+3. aprire il progetto appena rigenerato;
+4. usare **Product → Clean Build Folder** e creare un nuovo Archive;
+5. verificare in Impostazioni dell'app il numero di build prima della consegna.
+
+Il build corrente è `2.0 (2)`. Un'app che non mostra questo numero non proviene
+da questa revisione. Mantenendo lo stesso bundle identifier e la stessa firma,
+l'installazione aggiorna l'app senza cancellarne i dati.
 
 Poi usare l’UDID di un iPhone Simulator nell’argomento `-destination`:
 

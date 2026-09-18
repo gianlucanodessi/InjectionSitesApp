@@ -14,4 +14,21 @@ enum EventTime {
               calendar.isDate(result, inSameDayAs: date) else { return nil }
         return result
     }
+
+    static func replacingDate(in date: Date, with selectedDay: Date, calendar: Calendar = .current) -> Date? {
+        let day = calendar.dateComponents([.era, .year, .month, .day], from: selectedDay)
+        let time = calendar.dateComponents([.hour, .minute], from: date)
+        var components = DateComponents()
+        components.calendar = calendar
+        components.timeZone = calendar.timeZone
+        components.era = day.era
+        components.year = day.year
+        components.month = day.month
+        components.day = day.day
+        components.hour = time.hour
+        components.minute = time.minute
+        components.second = 0
+        components.nanosecond = 0
+        return calendar.date(from: components)
+    }
 }

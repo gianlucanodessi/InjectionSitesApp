@@ -60,9 +60,9 @@ final class InSofinaUITests: XCTestCase {
         XCTAssertTrue(area.isHittable)
         area.tap()
         XCTAssertTrue(app.navigationBars["Braccio destro"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.datePickers.firstMatch.exists)
-        let time = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Ora:")).firstMatch
+        let time = app.buttons["eventTimeButton"]
         for _ in 0..<4 { if time.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(time.isHittable)
         time.tap()
         XCTAssertTrue(app.navigationBars["Seleziona l’ora"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.pickerWheels.count, 2)
@@ -72,6 +72,17 @@ final class InSofinaUITests: XCTestCase {
         let updatedTime = app.buttons.matching(NSPredicate(format: "label == %@", "Ora: 23:59")).firstMatch
         XCTAssertTrue(updatedTime.waitForExistence(timeout: 5))
         XCTAssertEqual(updatedTime.label, "Ora: 23:59")
+        let expectedOrder = ["entryChoiceHeading", "eventTimeHeading", "bodyImageHeading", "positionsHeading", "calendarHeading"]
+        var previousY = -Double.greatestFiniteMagnitude
+        for identifier in expectedOrder {
+            let element = app.staticTexts[identifier]
+            XCTAssertTrue(element.exists, "Elemento mancante: \(identifier)")
+            XCTAssertGreaterThan(element.frame.minY, previousY, "Ordine errato per \(identifier)")
+            previousY = element.frame.minY
+        }
+        let calendar = app.datePickers["eventCalendar"]
+        for _ in 0..<12 { if calendar.exists && calendar.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(calendar.exists)
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Dettaglio anatomico e ora 24 ore"; attachment.lifetime = .keepAlways
         add(attachment)
