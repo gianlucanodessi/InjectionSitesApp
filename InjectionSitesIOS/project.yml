@@ -9,7 +9,7 @@ settings:
     SWIFT_VERSION: '5.0'
     PRODUCT_BUNDLE_IDENTIFIER: com.example.insofina.ios
     MARKETING_VERSION: '2.0'
-    CURRENT_PROJECT_VERSION: 1
+    CURRENT_PROJECT_VERSION: 2
     CODE_SIGNING_ALLOWED: 'NO'
 targets:
   InSofina:

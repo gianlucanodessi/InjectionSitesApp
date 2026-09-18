@@ -33,6 +33,9 @@ struct SettingsScreen: View {
             if let error { Section { Text(error).foregroundStyle(.red) } }
             Section { Button("Ripristina valori predefiniti") { reload(TimingSettings()); save() } }
             BackupSection { backupOperation = $0 }
+            Section("Versione installata") {
+                Text(appVersionText).accessibilityIdentifier("installedAppVersion")
+            }
         }
         .navigationTitle("Impostazioni")
         .sheet(item: $backupOperation) { operation in
@@ -53,6 +56,12 @@ struct SettingsScreen: View {
     }
     private func field(_ label: String, text: Binding<String>) -> some View {
         HStack { Text(label); Spacer(); TextField(label, text: Binding(get: { text.wrappedValue }, set: { text.wrappedValue = $0; saved = false; error = nil })).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(maxWidth: 120) }
+    }
+    private var appVersionText: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "-"
+        let build = info?["CFBundleVersion"] as? String ?? "-"
+        return "InSofina \(version) (build \(build))"
     }
     private func reload(_ value: TimingSettings) {
         red = String(value.redHours); orange = String(value.orangeHours); yellow = String(value.yellowHours); stage = String(value.sensorStageDays); hidden = String(value.sensorHiddenDays)

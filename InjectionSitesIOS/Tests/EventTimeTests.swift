@@ -35,4 +35,19 @@ final class EventTimeTests: XCTestCase {
             }
         }
     }
+
+    func testCalendarSelectionPreservesTimeAndClearsSeconds() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Europe/Rome"))
+        let original = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 9, day: 18, hour: 23, minute: 59, second: 42)))
+        let selectedDay = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 8, day: 21, hour: 12)))
+        let result = try XCTUnwrap(EventTime.replacingDate(in: original, with: selectedDay, calendar: calendar))
+        let components = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: result)
+        XCTAssertEqual(components.year, 2026)
+        XCTAssertEqual(components.month, 8)
+        XCTAssertEqual(components.day, 21)
+        XCTAssertEqual(components.hour, 23)
+        XCTAssertEqual(components.minute, 59)
+        XCTAssertEqual(components.second, 0)
+    }
 }

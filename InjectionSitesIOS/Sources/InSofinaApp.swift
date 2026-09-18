@@ -1,6 +1,7 @@
 import SwiftUI
 
 @main @MainActor struct InSofinaApp: App {
+    @UIApplicationDelegateAdaptor(PortraitAppDelegate.self) private var appDelegate
     @StateObject private var store: StateStore = {
         #if DEBUG
         if let fixture = UITestSupport.historyStore() { return fixture }
@@ -72,18 +73,30 @@ struct AreaScreen: View {
     @State private var saved = false
     @State private var future = false
     @State private var timePicker = false
+    private var calendarDate: Binding<Date> {
+        Binding(
+            get: { date },
+            set: { selectedDay in
+                if let merged = EventTime.replacingDate(in: date, with: selectedDay) { date = merged }
+            }
+        )
+    }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Vista a specchio · \(store.state.avatar.label)").font(.headline)
+                Text("Scelta iniezione").font(.headline).accessibilityIdentifier("entryChoiceHeading")
                 Picker("Tipo di registrazione", selection: $mode) { ForEach(EntryMode.allCases, id: \.self) { Text($0.label).tag($0) } }.pickerStyle(.segmented)
                 if mode == .INSULINA {
                     Picker("Tipo di insulina", selection: $insulin) { ForEach(InsulinType.allCases, id: \.self) { Text($0.label).tag($0) } }.pickerStyle(.segmented)
                 }
-                Text("Quando è avvenuto l’evento").bold()
-                DatePicker("Data", selection: $date, displayedComponents: .date).datePickerStyle(.graphical)
+                Text("Orario").font(.headline).accessibilityIdentifier("eventTimeHeading")
                 Button { timePicker = true } label: { Label("Ora: \(EventTime.text(for: date))", systemImage: "clock") }
+                    .accessibilityIdentifier("eventTimeButton")
+                Text("Immagine").font(.headline).accessibilityIdentifier("bodyImageHeading")
                 BodyDiagram(state: store.state, detail: area, selected: zone) { _, index in zone = index; saved = false }
+                    .accessibilityIdentifier("bodyDiagram")
+                Text("Elenco posizioni").font(.headline).accessibilityIdentifier("positionsHeading")
                 TimelineView(.periodic(from: .now, by: 60)) { timeline in
                     VStack(spacing: 10) {
                         ForEach(0..<area.zoneCount, id: \.self) { index in
@@ -99,6 +112,10 @@ struct AreaScreen: View {
                     }
                 }
                 if saved { Text(mode == .INSULINA ? "Iniezione salvata." : "Sensore salvato.").foregroundStyle(.green).accessibilityIdentifier("eventSaved") }
+                Text("Calendario").font(.headline).accessibilityIdentifier("calendarHeading")
+                DatePicker("Data", selection: calendarDate, displayedComponents: .date)
+                    .datePickerStyle(.graphical)
+                    .accessibilityIdentifier("eventCalendar")
             }.padding()
         }
         .navigationTitle(area.label)
